@@ -9,6 +9,7 @@ Window::Window() : window(nullptr), width(0), height(0), title("") {}
 Window::~Window() {
     if (window) {
         glfwDestroyWindow(window);
+        window = nullptr;
     }
 }
 
