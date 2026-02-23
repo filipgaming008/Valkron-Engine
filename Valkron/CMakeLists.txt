@@ -2,6 +2,10 @@ cmake_minimum_required(VERSION 4.2 FATAL_ERROR)
 project(Valkron VERSION 0.0.1)
 
 # Dependencies
+# Add GLFW as a submodule
+if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/vendor/glfw/CMakeLists.txt")
+    message(FATAL_ERROR "GLFW submodule not found! Please run: git submodule update --init --recursive")
+endif()
 add_subdirectory(vendor/glfw)
 
 # Add source & header files
@@ -19,6 +23,7 @@ add_library(${PROJECT_NAME} SHARED ${PROJECT_SOURCES} ${PROJECT_HEADERS})
 target_include_directories(${PROJECT_NAME}
     PUBLIC  ${CMAKE_CURRENT_SOURCE_DIR}/include
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src
+    PUBLIC  ${CMAKE_CURRENT_SOURCE_DIR}/vendor/glfw/include
 )
 
 # Link GLFW and OpenGL
@@ -28,10 +33,11 @@ target_link_libraries(${PROJECT_NAME} PRIVATE glfw OpenGL::GL)
 # Platform detection
 if(UNIX AND NOT APPLE)
     target_compile_definitions(${PROJECT_NAME} PUBLIC VALKRON_PLATFORM_LINUX)
+    target_compile_options(${PROJECT_NAME} PRIVATE -fvisibility=hidden)
 elseif(WIN32)
     target_compile_definitions(${PROJECT_NAME} PUBLIC VALKRON_PLATFORM_WINDOWS)
-    target_compile_definitions(${PROJECT_NAME} PRIVATE VALKRON_BUILD_DLL)
 endif()
+target_compile_definitions(${PROJECT_NAME} PRIVATE VALKRON_BUILD_DLL)
 
 # Tag engine sources so logging knows the source
 target_compile_definitions(${PROJECT_NAME} PRIVATE VALKRON_BUILD_ENGINE)
