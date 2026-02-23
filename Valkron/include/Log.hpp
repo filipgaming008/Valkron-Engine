@@ -1,57 +1,41 @@
 #pragma once
 
-#include <iostream>
+#include <cassert>
 
-// Simple colored output
-enum class LogColor {
-    RED, GREEN, YELLOW, BLUE, RESET
-};
-
-#ifdef _WIN32
-    #include <windows.h>
-    inline void setColor(LogColor color) {
-        HANDLE hConsole = GetStdHandle(STD_OUTPUT_HANDLE);
-        switch(color) {
-            case LogColor::RED:    SetConsoleTextAttribute(hConsole, 12); break;
-            case LogColor::GREEN:  SetConsoleTextAttribute(hConsole, 10); break;
-            case LogColor::YELLOW: SetConsoleTextAttribute(hConsole, 14); break;
-            case LogColor::BLUE:   SetConsoleTextAttribute(hConsole, 9); break;
-            default:                SetConsoleTextAttribute(hConsole, 7); break;
-        }
-    }
+// Auto-detect source: Engine or App
+#ifdef VALKRON_BUILD_ENGINE
+    #define VALKRON_LOG_SOURCE "Valkron"
 #else
-    inline void setColor(LogColor color) {
-        switch(color) {
-            case LogColor::RED:    std::cout << "\033[31m"; break;
-            case LogColor::GREEN:  std::cout << "\033[32m"; break;
-            case LogColor::YELLOW: std::cout << "\033[33m"; break;
-            case LogColor::BLUE:   std::cout << "\033[34m"; break;
-            default:                std::cout << "\033[0m"; break;
-        }
-    }
+    #define VALKRON_LOG_SOURCE "App"
 #endif
 
-// Simple logging functions
-inline void logInfo(const std::string& msg) {
-    setColor(LogColor::GREEN);
-    std::cout << "[INFO] " << msg << std::endl;
-    setColor(LogColor::RESET);
-}
+// Logging macros — compiled out in release (NDEBUG)
+#ifdef NDEBUG
+    #define LOG_INFO(msg)  ((void)0)
+    #define LOG_WARN(msg)  ((void)0)
+    #define LOG_ERROR(msg) ((void)0)
+    #define LOG_DEBUG(msg) ((void)0)
+    #define VALKRON_ASSERT(expr, msg)      ((void)0)
+    #define VALKRON_CORE_ASSERT(expr, msg) ((void)0)
+#else
+    #include <iostream>
+    #include <string>
 
-inline void logWarn(const std::string& msg) {
-    setColor(LogColor::YELLOW);
-    std::cout << "[WARN] " << msg << std::endl;
-    setColor(LogColor::RESET);
-}
+    #define LOG_INFO(msg) \
+        std::cout << "\033[32m[INFO] [" << VALKRON_LOG_SOURCE << "] " << (msg) << "\033[0m" << std::endl
 
-inline void logError(const std::string& msg) {
-    setColor(LogColor::RED);
-    std::cerr << "[ERROR] " << msg << std::endl;
-    setColor(LogColor::RESET);
-}
+    #define LOG_WARN(msg) \
+        std::cout << "\033[33m[WARN] [" << VALKRON_LOG_SOURCE << "] " << (msg) << "\033[0m" << std::endl
 
-inline void logDebug(const std::string& msg) {
-    setColor(LogColor::BLUE);
-    std::cout << "[DEBUG] " << msg << std::endl;
-    setColor(LogColor::RESET);
-}
+    #define LOG_ERROR(msg) \
+        std::cerr << "\033[31m[ERROR] [" << VALKRON_LOG_SOURCE << "] " << (msg) << "\033[0m" << std::endl
+
+    #define LOG_DEBUG(msg) \
+        std::cout << "\033[34m[DEBUG] [" << VALKRON_LOG_SOURCE << "] " << (msg) << "\033[0m" << std::endl
+
+    #define VALKRON_ASSERT(expr, msg) \
+        assert((expr) && (msg))
+
+    #define VALKRON_CORE_ASSERT(expr, msg) \
+        assert((expr) && (msg))
+#endif

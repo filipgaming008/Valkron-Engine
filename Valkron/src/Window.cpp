@@ -1,18 +1,17 @@
 #include "Window.hpp"
-#include "Log.hpp"
 
 namespace Valkron {
 
     Window::Window() {
         if (!glfwInit()) {
-            logError("Failed to initialize GLFW");
+            VALKRON_CORE_ASSERT(false, "Failed to initialize GLFW");
             return;
         }
 
         window = glfwCreateWindow(800, 600, "Valkron Engine", nullptr, nullptr);
 
         if (!window) {
-            logError("Failed to create GLFW window");
+            VALKRON_CORE_ASSERT(false, "Failed to create GLFW window");
             glfwTerminate();
             return;
         }

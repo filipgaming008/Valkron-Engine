@@ -33,6 +33,9 @@ elseif(WIN32)
     target_compile_definitions(${PROJECT_NAME} PRIVATE VALKRON_BUILD_DLL)
 endif()
 
+# Tag engine sources so logging knows the source
+target_compile_definitions(${PROJECT_NAME} PRIVATE VALKRON_BUILD_ENGINE)
+
 # Set output directories
 set_target_properties(${PROJECT_NAME} PROPERTIES
     ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/bin/lib"

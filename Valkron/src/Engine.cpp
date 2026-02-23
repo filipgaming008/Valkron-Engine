@@ -7,7 +7,7 @@
 namespace Valkron {
 
     void Engine::Init() {
-        logInfo("Valkron Engine Initialized!");
+        LOG_INFO("Valkron Engine Initialized!");
     }
 
 }

@@ -4,14 +4,14 @@
 
 namespace Valkron {
 
-class VALKRON_API Engine {
-private:
+    class VALKRON_API Engine {
+        private:
 
-public:
-    Engine() = default;
-    virtual ~Engine() = default;
+        public:
+            Engine() = default;
+            virtual ~Engine() = default;
 
-    static void Init();
-};
+            static void Init();
+    };
 
 }

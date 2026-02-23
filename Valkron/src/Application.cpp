@@ -4,18 +4,20 @@ namespace Valkron {
 
     Application::Application() {
         m_window = std::make_unique<Window>();
-        logInfo("Application Created!");
+        LOG_INFO("Application Created!");
     }
 
     Application::~Application() {
-        logInfo("Application Closed!");
+        LOG_INFO("Application Closed!");
     }
 
     void Application::Run() {
+        
+        LOG_INFO("Running Application...");
+
         while (isRunning) {
             glfwPollEvents();
 
-            logInfo("Running Application...");
 
             m_window->Update();
 
