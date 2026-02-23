@@ -1,0 +1,3 @@
+[submodule "Valkron/vendor/glfw"]
+	path = Valkron/vendor/glfw
+	url = https://github.com/glfw/glfw.git
