@@ -1,3 +1,6 @@
 [submodule "Valkron/vendor/glfw"]
 	path = Valkron/vendor/glfw
 	url = https://github.com/glfw/glfw.git
+[submodule "Valkron/vendor/glm"]
+	path = Valkron/vendor/glm
+	url = https://github.com/g-truc/glm.git

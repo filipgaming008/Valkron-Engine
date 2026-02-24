@@ -7,6 +7,7 @@ if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/vendor/glfw/CMakeLists.txt")
     message(FATAL_ERROR "GLFW submodule not found! Please run: git submodule update --init --recursive")
 endif()
 add_subdirectory(vendor/glfw)
+add_subdirectory(vendor/glm)
 
 # Add source & header files
 file(GLOB_RECURSE PROJECT_HEADERS CONFIGURE_DEPENDS
@@ -24,6 +25,7 @@ target_include_directories(${PROJECT_NAME}
     PUBLIC  ${CMAKE_CURRENT_SOURCE_DIR}/include
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src
     PUBLIC  ${CMAKE_CURRENT_SOURCE_DIR}/vendor/glfw/include
+    PUBLIC  ${CMAKE_CURRENT_SOURCE_DIR}/vendor/glm
 )
 
 # Link GLFW and OpenGL

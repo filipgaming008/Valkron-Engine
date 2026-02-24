@@ -2,6 +2,7 @@
 
 #include "Core.hpp"
 #include "Window.hpp"
+#include "InputManager.hpp"
 #include "Log.hpp"
 #include <memory>
 
