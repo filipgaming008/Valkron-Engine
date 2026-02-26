@@ -4,6 +4,7 @@
 #include "GLFW/glfw3.h"
 #include "glm/glm.hpp"
 #include "Layer.hpp"
+#include "Log.hpp"
 
 namespace Valkron {
 

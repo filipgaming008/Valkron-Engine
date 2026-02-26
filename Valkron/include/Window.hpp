@@ -19,6 +19,7 @@ namespace Valkron {
             }
 
             void Update();
+            inline GLFWwindow* getWindow() const { return window; }
 };
 
 
