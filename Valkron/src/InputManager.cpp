@@ -1,5 +1,6 @@
 
 #include "InputManager.hpp"
+#include "Layer.hpp"
 #include "Log.hpp"
 
 namespace Valkron {
@@ -14,49 +15,55 @@ namespace Valkron {
         glfwSetMouseButtonCallback(window, glfwMouseButtonCallback);
         glfwSetCursorPosCallback(window, glfwCursorPosCallback);
         glfwSetScrollCallback(window, glfwScrollCallback);
+        glfwSetWindowCloseCallback(window, glfwWindowCloseCallback);
+        glfwSetFramebufferSizeCallback(window, glfwFramebufferSizeCallback);
         glfwSetWindowUserPointer(window, this);
         LOG_INFO("InputManager initialized successfully!");
     }
 
+    void InputManager::setEventCallback(EventCallback callback) {
+        m_eventCallback = callback;
+    }
+
     void InputManager::update() {
         m_previousKeyStates = m_keyStates;
-        m_previousMousePosition = m_mousePosition;
         m_mouseDelta = m_mousePosition - m_previousMousePosition;
+        m_previousMousePosition = m_mousePosition;
         m_scrollDelta = 0.0f;
     }
 
     void InputManager::shutdown() {
         LOG_INFO("InputManager shutdown called.");
         m_layerStack.clear();
-        m_keyCallbacks.clear();
-        m_mouseButtonCallbacks.clear();
-        m_mouseMoveCallbacks.clear();
-        m_scrollCallbacks.clear();
+        m_layerEnabled.clear();
+        m_eventCallback = nullptr;
     }
 
-    void InputManager::pushLayer(int layerId) {
-        LOG_DEBUG("Pushing layer: " + std::to_string(layerId));
-        m_layerStack.push_back(layerId);
-        m_layerEnabled[layerId] = true;
-        LOG_INFO("Pushed layer " + std::to_string(layerId) + ". Total layers: " + std::to_string(m_layerStack.size()));
+    void InputManager::pushLayer(Layer* layer) {
+        VALKRON_ASSERT(layer != nullptr, "Layer pointer must not be null");
+        LOG_DEBUG("Pushing layer: " + std::to_string(layer->getLayerId()));
+        m_layerStack.push_back(layer);
+        m_layerEnabled[layer] = true;
+        LOG_INFO("Pushed layer " + std::to_string(layer->getLayerId()) + ". Total layers: " + std::to_string(m_layerStack.size()));
     }
 
     void InputManager::popLayer() {
         LOG_DEBUG("Popping top layer.");
         if (!m_layerStack.empty()) {
-            int layerId = m_layerStack.back();
+            Layer* layer = m_layerStack.back();
             m_layerStack.pop_back();
-            m_layerEnabled.erase(layerId);
-            LOG_INFO("Popped layer " + std::to_string(layerId) + ". Remaining layers: " + std::to_string(m_layerStack.size()));
+            m_layerEnabled.erase(layer);
+            LOG_INFO("Popped layer " + std::to_string(layer->getLayerId()) + ". Remaining layers: " + std::to_string(m_layerStack.size()));
         } else {
             LOG_WARN("Tried to pop layer from empty stack.");
         }
     }
 
-    void InputManager::setLayerEnabled(int layerId, bool enabled) {
-        LOG_DEBUG("Setting layer " + std::to_string(layerId) + " enabled: " + (enabled ? "true" : "false"));
-        m_layerEnabled[layerId] = enabled;
-        LOG_INFO("Set layer " + std::to_string(layerId) + " enabled: " + (enabled ? "true" : "false"));
+    void InputManager::setLayerEnabled(Layer* layer, bool enabled) {
+        VALKRON_ASSERT(layer != nullptr, "Layer pointer must not be null");
+        LOG_DEBUG("Setting layer " + std::to_string(layer->getLayerId()) + " enabled: " + (enabled ? "true" : "false"));
+        m_layerEnabled[layer] = enabled;
+        LOG_INFO("Set layer " + std::to_string(layer->getLayerId()) + " enabled: " + (enabled ? "true" : "false"));
     }
 
     bool InputManager::isKeyPressed(int key) const {
@@ -86,29 +93,27 @@ namespace Valkron {
         return m_scrollDelta;
     }
 
-    // Callback registration
-    void InputManager::registerKeyCallback(int layerId, KeyCallback callback) {
-        LOG_DEBUG("Registering key callback for layer: " + std::to_string(layerId));
-        VALKRON_ASSERT(callback != nullptr, "KeyCallback must not be null");
-        m_keyCallbacks[layerId].push_back(callback);
-    }
+    void InputManager::dispatchEvent(Event& event) {
+        if (m_eventCallback) {
+            m_eventCallback(event);
+        }
 
-    void InputManager::registerMouseButtonCallback(int layerId, MouseButtonCallback callback) {
-        LOG_DEBUG("Registering mouse button callback for layer: " + std::to_string(layerId));
-        VALKRON_ASSERT(callback != nullptr, "MouseButtonCallback must not be null");
-        m_mouseButtonCallbacks[layerId].push_back(callback);
-    }
+        if (event.handled) {
+            return;
+        }
 
-    void InputManager::registerMouseMoveCallback(int layerId, MouseMoveCallback callback) {
-        LOG_DEBUG("Registering mouse move callback for layer: " + std::to_string(layerId));
-        VALKRON_ASSERT(callback != nullptr, "MouseMoveCallback must not be null");
-        m_mouseMoveCallbacks[layerId].push_back(callback);
-    }
+        for (auto it = m_layerStack.rbegin(); it != m_layerStack.rend(); ++it) {
+            Layer* layer = *it;
+            auto enabledIt = m_layerEnabled.find(layer);
+            if (enabledIt != m_layerEnabled.end() && !enabledIt->second) {
+                continue;
+            }
 
-    void InputManager::registerScrollCallback(int layerId, ScrollCallback callback) {
-        LOG_DEBUG("Registering scroll callback for layer: " + std::to_string(layerId));
-        VALKRON_ASSERT(callback != nullptr, "ScrollCallback must not be null");
-        m_scrollCallbacks[layerId].push_back(callback);
+            layer->onEvent(event);
+            if (event.handled) {
+                break;
+            }
+        }
     }
 
     void InputManager::glfwKeyCallback(GLFWwindow* window, int key, int scancode, int action, int mods) {
@@ -119,19 +124,9 @@ namespace Valkron {
         }
         LOG_DEBUG("GLFW key callback: key=" + std::to_string(key) + ", action=" + std::to_string(action));
         manager->m_keyStates[key] = (action != GLFW_RELEASE);
-        for (auto it = manager->m_layerStack.rbegin(); it != manager->m_layerStack.rend(); ++it) {
-            int layerId = *it;
-            // Skip disabled layers
-            auto enabledIt = manager->m_layerEnabled.find(layerId);
-            if (enabledIt != manager->m_layerEnabled.end() && !enabledIt->second)
-                continue;
-            auto callbacksIt = manager->m_keyCallbacks.find(layerId);
-            if (callbacksIt != manager->m_keyCallbacks.end()) {
-                for (auto& callback : callbacksIt->second) {
-                    callback(key, scancode, action, mods);
-                }
-            }
-        }
+
+        KeyEvent event(key, scancode, action, mods);
+        manager->dispatchEvent(event);
     }
 
     void InputManager::glfwMouseButtonCallback(GLFWwindow* window, int button, int action, int mods) {
@@ -142,18 +137,9 @@ namespace Valkron {
         }
         LOG_DEBUG("GLFW mouse button callback: button=" + std::to_string(button) + ", action=" + std::to_string(action));
         manager->m_mouseButtonStates[button] = (action != GLFW_RELEASE);
-        for (auto it = manager->m_layerStack.rbegin(); it != manager->m_layerStack.rend(); ++it) {
-            int layerId = *it;
-            auto enabledIt = manager->m_layerEnabled.find(layerId);
-            if (enabledIt != manager->m_layerEnabled.end() && !enabledIt->second)
-                continue;
-            auto callbacksIt = manager->m_mouseButtonCallbacks.find(layerId);
-            if (callbacksIt != manager->m_mouseButtonCallbacks.end()) {
-                for (auto& callback : callbacksIt->second) {
-                    callback(button, action, mods);
-                }
-            }
-        }
+
+        MouseButtonEvent event(button, action, mods);
+        manager->dispatchEvent(event);
     }
 
     void InputManager::glfwCursorPosCallback(GLFWwindow* window, double xpos, double ypos) {
@@ -164,18 +150,9 @@ namespace Valkron {
         }
         LOG_DEBUG("GLFW cursor pos callback: x=" + std::to_string(xpos) + ", y=" + std::to_string(ypos));
         manager->m_mousePosition = glm::vec2(xpos, ypos);
-        for (auto it = manager->m_layerStack.rbegin(); it != manager->m_layerStack.rend(); ++it) {
-            int layerId = *it;
-            auto enabledIt = manager->m_layerEnabled.find(layerId);
-            if (enabledIt != manager->m_layerEnabled.end() && !enabledIt->second)
-                continue;
-            auto callbacksIt = manager->m_mouseMoveCallbacks.find(layerId);
-            if (callbacksIt != manager->m_mouseMoveCallbacks.end()) {
-                for (auto& callback : callbacksIt->second) {
-                    callback(xpos, ypos);
-                }
-            }
-        }
+
+        MouseMoveEvent event(xpos, ypos);
+        manager->dispatchEvent(event);
     }
 
     void InputManager::glfwScrollCallback(GLFWwindow* window, double xoffset, double yoffset) {
@@ -186,18 +163,33 @@ namespace Valkron {
         }
         LOG_DEBUG("GLFW scroll callback: xoffset=" + std::to_string(xoffset) + ", yoffset=" + std::to_string(yoffset));
         manager->m_scrollDelta = static_cast<float>(yoffset);
-        for (auto it = manager->m_layerStack.rbegin(); it != manager->m_layerStack.rend(); ++it) {
-            int layerId = *it;
-            auto enabledIt = manager->m_layerEnabled.find(layerId);
-            if (enabledIt != manager->m_layerEnabled.end() && !enabledIt->second)
-                continue;
-            auto callbacksIt = manager->m_scrollCallbacks.find(layerId);
-            if (callbacksIt != manager->m_scrollCallbacks.end()) {
-                for (auto& callback : callbacksIt->second) {
-                    callback(xoffset, yoffset);
-                }
-            }
+
+        MouseScrollEvent event(xoffset, yoffset);
+        manager->dispatchEvent(event);
+    }
+
+    void InputManager::glfwWindowCloseCallback(GLFWwindow* window) {
+        auto* manager = static_cast<InputManager*>(glfwGetWindowUserPointer(window));
+        if (!manager) {
+            LOG_ERROR("GLFW window close callback: InputManager pointer is null");
+            return;
         }
+
+        LOG_DEBUG("GLFW window close callback triggered");
+        WindowCloseEvent event;
+        manager->dispatchEvent(event);
+    }
+
+    void InputManager::glfwFramebufferSizeCallback(GLFWwindow* window, int width, int height) {
+        auto* manager = static_cast<InputManager*>(glfwGetWindowUserPointer(window));
+        if (!manager) {
+            LOG_ERROR("GLFW framebuffer size callback: InputManager pointer is null");
+            return;
+        }
+
+        LOG_DEBUG("GLFW framebuffer size callback: width=" + std::to_string(width) + ", height=" + std::to_string(height));
+        WindowResizeEvent event(width, height);
+        manager->dispatchEvent(event);
     }
 
 }

@@ -1,12 +1,17 @@
 #pragma once
 
 #include "Core.hpp"
+#include "Event.hpp"
 #include "GLFW/glfw3.h"
 #include "glm/glm.hpp"
-#include "Layer.hpp"
 #include "Log.hpp"
+#include <functional>
+#include <unordered_map>
+#include <vector>
 
 namespace Valkron {
+
+    class Layer;
 
 
     class VALKRON_API InputManager{
@@ -20,9 +25,12 @@ namespace Valkron {
             void update();
             void shutdown();
 
-            void pushLayer(int layerId);
+            using EventCallback = std::function<void(Event&)>;
+            void setEventCallback(EventCallback callback);
+
+            void pushLayer(Layer* layer);
             void popLayer();
-            void setLayerEnabled(int layerId, bool enabled);
+            void setLayerEnabled(Layer* layer, bool enabled);
 
             bool isKeyPressed(int key) const;
             bool isMouseButtonPressed(int button) const;
@@ -30,24 +38,18 @@ namespace Valkron {
             glm::vec2 getMouseDelta() const;
             float getScrollDelta() const;
 
-            using KeyCallback = std::function<void(int key, int scancode, int action, int mods)>;
-            using MouseButtonCallback = std::function<void(int button, int action, int mods)>;
-            using MouseMoveCallback = std::function<void(double x, double y)>;
-            using ScrollCallback = std::function<void(double xOffset, double yOffset)>;
-
-            void registerKeyCallback(int layerId, KeyCallback callback);
-            void registerMouseButtonCallback(int layerId, MouseButtonCallback callback);
-            void registerMouseMoveCallback(int layerId, MouseMoveCallback callback);
-            void registerScrollCallback(int layerId, ScrollCallback callback);
-
         private:
             InputManager() = default;
             ~InputManager() = default;
+
+            void dispatchEvent(Event& event);
 
             static void glfwKeyCallback(GLFWwindow* window, int key, int scancode, int action, int mods);
             static void glfwMouseButtonCallback(GLFWwindow* window, int button, int action, int mods);
             static void glfwCursorPosCallback(GLFWwindow* window, double xpos, double ypos);
             static void glfwScrollCallback(GLFWwindow* window, double xoffset, double yoffset);
+            static void glfwWindowCloseCallback(GLFWwindow* window);
+            static void glfwFramebufferSizeCallback(GLFWwindow* window, int width, int height);
 
             GLFWwindow* m_window = nullptr;
 
@@ -59,13 +61,9 @@ namespace Valkron {
             glm::vec2 m_mouseDelta{0.0f};
             float m_scrollDelta = 0.0f;
 
-            std::vector<int> m_layerStack;
-            std::unordered_map<int, bool> m_layerEnabled;
-
-            std::unordered_map<int, std::vector<KeyCallback>> m_keyCallbacks;
-            std::unordered_map<int, std::vector<MouseButtonCallback>> m_mouseButtonCallbacks;
-            std::unordered_map<int, std::vector<MouseMoveCallback>> m_mouseMoveCallbacks;
-            std::unordered_map<int, std::vector<ScrollCallback>> m_scrollCallbacks;
+            std::vector<Layer*> m_layerStack;
+            std::unordered_map<Layer*, bool> m_layerEnabled;
+                EventCallback m_eventCallback = nullptr;
     };
 
 

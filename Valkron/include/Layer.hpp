@@ -1,7 +1,7 @@
 #pragma once
 
 #include "Core.hpp"
-#include "InputManager.hpp"
+#include "Event.hpp"
 #include <string>
 
 namespace Valkron {
@@ -16,8 +16,8 @@ namespace Valkron {
             
             virtual void onAttach() {}
             virtual void onDetach() {}
-            virtual void onUpdate(float deltaTime) {}
-            virtual void onEvent() {}
+            virtual void onUpdate(float) {}
+            virtual void onEvent(Event&) {}
             
             int getLayerId() const { return m_layerId; }
     };

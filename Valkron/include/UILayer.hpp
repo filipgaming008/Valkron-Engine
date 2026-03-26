@@ -1,7 +1,7 @@
 #pragma once
 
 #include "Core.hpp"
-#include "InputManager.hpp"
+#include "Event.hpp"
 #include "Layer.hpp"
 
 namespace Valkron {
@@ -14,6 +14,7 @@ namespace Valkron {
             void onAttach() override;
             void onDetach() override;
             void onUpdate(float deltaTime) override;
+            void onEvent(Event& event) override;
     };
 
 }

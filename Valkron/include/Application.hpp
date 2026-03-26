@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Core.hpp"
+#include "Event.hpp"
 #include "Window.hpp"
 #include "InputManager.hpp"
 #include "Layer.hpp"
@@ -22,6 +23,9 @@ namespace Valkron {
             virtual ~Application();
 
             void Run();
+
+        private:
+            void onEvent(Event& event);
     };
 
 }
