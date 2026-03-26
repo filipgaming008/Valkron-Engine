@@ -1,8 +1,8 @@
 #pragma once
 
-#include "Core.hpp"
-#include "Event.hpp"
-#include "Layer.hpp"
+#include "Core/Core.hpp"
+#include "Event/Event.hpp"
+#include "Application/Layer.hpp"
 
 namespace Valkron {
 

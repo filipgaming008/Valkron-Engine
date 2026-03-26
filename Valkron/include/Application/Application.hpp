@@ -1,12 +1,12 @@
 #pragma once
 
-#include "Core.hpp"
-#include "Event.hpp"
-#include "Window.hpp"
-#include "InputManager.hpp"
-#include "Layer.hpp"
-#include "UILayer.hpp"
-#include "Log.hpp"
+#include "Core/Core.hpp"
+#include "Event/Event.hpp"
+#include "Window/Window.hpp"
+#include "Input/InputManager.hpp"
+#include "Application/Layer.hpp"
+#include "Application/UILayer.hpp"
+#include "Core/Log.hpp"
 #include <memory>
 
 namespace Valkron {

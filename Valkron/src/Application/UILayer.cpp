@@ -1,9 +1,9 @@
-#include "UILayer.hpp"
-#include "Event.hpp"
+#include "Application/UILayer.hpp"
+#include "Event/Event.hpp"
 #include "GLFW/glfw3.h"
-#include "Log.hpp"
+#include "Core/Log.hpp"
 
-namespace Valkron { 
+namespace Valkron {
 
     void UILayer::onAttach() {
         LOG_DEBUG("UILayer attached.");

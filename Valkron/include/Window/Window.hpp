@@ -1,7 +1,8 @@
 #pragma once
 
-#include "Core.hpp"
-#include "Log.hpp"
+#include "Core/Core.hpp"
+#include "Core/Log.hpp"
+#define GLFW_INCLUDE_NONE
 #include "GLFW/glfw3.h"
 
 namespace Valkron {
@@ -20,7 +21,7 @@ namespace Valkron {
 
             void Update();
             inline GLFWwindow* getWindow() const { return window; }
-};
+    };
 
 
 }

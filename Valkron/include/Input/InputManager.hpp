@@ -1,10 +1,10 @@
 #pragma once
 
-#include "Core.hpp"
-#include "Event.hpp"
+#include "Core/Core.hpp"
+#include "Event/Event.hpp"
 #include "GLFW/glfw3.h"
 #include "glm/glm.hpp"
-#include "Log.hpp"
+#include "Core/Log.hpp"
 #include <functional>
 #include <unordered_map>
 #include <vector>
@@ -14,7 +14,7 @@ namespace Valkron {
     class Layer;
 
 
-    class VALKRON_API InputManager{
+    class VALKRON_API InputManager {
         public:
             static InputManager& getInstance() {
                 static InputManager instance;
@@ -63,7 +63,7 @@ namespace Valkron {
 
             std::vector<Layer*> m_layerStack;
             std::unordered_map<Layer*, bool> m_layerEnabled;
-                EventCallback m_eventCallback = nullptr;
+            EventCallback m_eventCallback = nullptr;
     };
 
 

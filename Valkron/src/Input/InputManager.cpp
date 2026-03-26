@@ -1,7 +1,6 @@
-
-#include "InputManager.hpp"
-#include "Layer.hpp"
-#include "Log.hpp"
+#include "Input/InputManager.hpp"
+#include "Application/Layer.hpp"
+#include "Core/Log.hpp"
 
 namespace Valkron {
 

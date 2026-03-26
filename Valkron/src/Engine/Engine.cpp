@@ -1,6 +1,6 @@
-#include "Application.hpp"
-#include "Engine.hpp"
-#include "Log.hpp"
+#include "Application/Application.hpp"
+#include "Engine/Engine.hpp"
+#include "Core/Log.hpp"
 
 #include <iostream>
 

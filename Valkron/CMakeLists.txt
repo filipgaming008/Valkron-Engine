@@ -9,6 +9,17 @@ endif()
 add_subdirectory(vendor/glfw)
 add_subdirectory(vendor/glm)
 
+if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/vendor/glad/cmake/CMakeLists.txt")
+    message(FATAL_ERROR "GLAD submodule not found! Please run: git submodule update --init --recursive")
+endif()
+add_subdirectory(vendor/glad/cmake)
+glad_add_library(glad_gl_core_46 STATIC REPRODUCIBLE API gl:core=4.6)
+set_target_properties(glad_gl_core_46 PROPERTIES POSITION_INDEPENDENT_CODE ON)
+
+if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/vendor/stb/stb_image.h")
+    message(FATAL_ERROR "stb submodule not found! Please run: git submodule update --init --recursive")
+endif()
+
 # Add source & header files
 file(GLOB_RECURSE PROJECT_HEADERS CONFIGURE_DEPENDS
     ${CMAKE_CURRENT_SOURCE_DIR}/include/*.hpp
@@ -26,11 +37,12 @@ target_include_directories(${PROJECT_NAME}
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src
     PUBLIC  ${CMAKE_CURRENT_SOURCE_DIR}/vendor/glfw/include
     PUBLIC  ${CMAKE_CURRENT_SOURCE_DIR}/vendor/glm
+    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/vendor/stb
 )
 
 # Link GLFW and OpenGL
 find_package(OpenGL REQUIRED)
-target_link_libraries(${PROJECT_NAME} PRIVATE glfw OpenGL::GL)
+target_link_libraries(${PROJECT_NAME} PRIVATE glfw OpenGL::GL glad_gl_core_46)
 
 # Platform detection
 if(UNIX AND NOT APPLE)

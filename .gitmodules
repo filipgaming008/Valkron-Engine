@@ -7,3 +7,6 @@
 [submodule "Valkron/vendor/glad"]
 	path = Valkron/vendor/glad
 	url = https://github.com/Dav1dde/glad.git
+[submodule "Valkron/vendor/stb"]
+	path = Valkron/vendor/stb
+	url = https://github.com/nothings/stb.git

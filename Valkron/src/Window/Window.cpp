@@ -1,4 +1,5 @@
-#include "Window.hpp"
+#include "Window/Window.hpp"
+#include "glad/gl.h"
 
 namespace Valkron {
 
@@ -8,6 +9,10 @@ namespace Valkron {
             return;
         }
 
+        glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
+        glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 6);
+        glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+
         window = glfwCreateWindow(800, 600, "Valkron Engine", nullptr, nullptr);
 
         if (!window) {
@@ -15,8 +20,11 @@ namespace Valkron {
             glfwTerminate();
             return;
         }
-        
+
         glfwMakeContextCurrent(window);
+
+        int gladVersion = gladLoadGL((GLADloadfunc)glfwGetProcAddress);
+        VALKRON_CORE_ASSERT(gladVersion != 0, "Failed to initialize GLAD");
     }
 
     Window::~Window() {
@@ -25,7 +33,6 @@ namespace Valkron {
     }
 
     void Window::Update() {
-        glClear(GL_COLOR_BUFFER_BIT);
         glfwSwapBuffers(window);
     }
 }

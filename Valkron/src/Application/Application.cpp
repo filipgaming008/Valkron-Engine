@@ -1,4 +1,5 @@
-#include "Application.hpp"
+#include "Application/Application.hpp"
+#include "Renderer/Renderer.hpp"
 
 namespace Valkron {
 
@@ -13,6 +14,7 @@ namespace Valkron {
         if (event.type == EventType::WindowResize) {
             auto& resizeEvent = static_cast<WindowResizeEvent&>(event);
             LOG_INFO("Window resized to " + std::to_string(resizeEvent.width) + "x" + std::to_string(resizeEvent.height));
+            Renderer::onWindowResize(resizeEvent.width, resizeEvent.height);
         }
     }
 
@@ -22,6 +24,13 @@ namespace Valkron {
         m_inputManager.setEventCallback([this](Event& event) {
             onEvent(event);
         });
+
+        Renderer::init();
+        int width = 0;
+        int height = 0;
+        glfwGetFramebufferSize(m_window->getWindow(), &width, &height);
+        Renderer::onWindowResize(width, height);
+
         m_inputManager.pushLayer(&m_layer);
         m_layer.onAttach();
         LOG_DEBUG("Application Created!");
@@ -29,6 +38,7 @@ namespace Valkron {
 
     Application::~Application() {
         m_layer.onDetach();
+        Renderer::shutdown();
         m_inputManager.shutdown();
 
         LOG_DEBUG("Application Closed!");
@@ -37,7 +47,7 @@ namespace Valkron {
     void Application::Run() {
 
         float lastTime = 0.0f;
-        
+
         LOG_DEBUG("Running Application...");
 
         while (isRunning) {
@@ -49,7 +59,9 @@ namespace Valkron {
 
             m_inputManager.update();
 
+            Renderer::beginFrame();
             m_layer.onUpdate(delta_time);
+            Renderer::endFrame();
 
             m_window->Update();
         }
