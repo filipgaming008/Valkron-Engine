@@ -48,6 +48,22 @@ namespace Valkron {
         glUniform1f(getUniformLocation(name), value);
     }
 
+    void Shader::setVec2(const std::string& name, const float* value) const {
+        glUniform2fv(getUniformLocation(name), 1, value);
+    }
+
+    void Shader::setVec3(const std::string& name, const float* value) const {
+        glUniform3fv(getUniformLocation(name), 1, value);
+    }
+
+    void Shader::setVec4(const std::string& name, const float* value) const {
+        glUniform4fv(getUniformLocation(name), 1, value);
+    }
+
+    void Shader::setMat3(const std::string& name, const float* value) const {
+        glUniformMatrix3fv(getUniformLocation(name), 1, GL_FALSE, value);
+    }
+
     void Shader::setMat4(const std::string& name, const float* value) const {
         glUniformMatrix4fv(getUniformLocation(name), 1, GL_FALSE, value);
     }
