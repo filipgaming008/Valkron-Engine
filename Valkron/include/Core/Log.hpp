@@ -34,8 +34,20 @@
         std::cout << "\033[34m[DEBUG] [" << VALKRON_LOG_SOURCE << "] " << (msg) << "\033[0m" << std::endl
 
     #define VALKRON_ASSERT(expr, msg) \
-        assert((expr) && (msg))
+        do { \
+            const bool _valkron_assert_ok = static_cast<bool>(expr); \
+            if (!_valkron_assert_ok) { \
+                LOG_ERROR(std::string("Assertion failed: ") + #expr + " | " + (msg)); \
+                assert(_valkron_assert_ok && (msg)); \
+            } \
+        } while (0)
 
     #define VALKRON_CORE_ASSERT(expr, msg) \
-        assert((expr) && (msg))
+        do { \
+            const bool _valkron_core_assert_ok = static_cast<bool>(expr); \
+            if (!_valkron_core_assert_ok) { \
+                LOG_ERROR(std::string("Core assertion failed: ") + #expr + " | " + (msg)); \
+                assert(_valkron_core_assert_ok && (msg)); \
+            } \
+        } while (0)
 #endif

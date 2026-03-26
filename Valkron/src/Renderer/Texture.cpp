@@ -82,15 +82,27 @@ namespace Valkron {
 
     Texture::Texture() {
         glGenTextures(1, &m_textureID);
+        VALKRON_CORE_ASSERT(m_textureID != 0, "Failed to generate OpenGL texture ID");
     }
 
     Texture::~Texture() {
-        glDeleteTextures(1, &m_textureID);
+        if (m_textureID != 0) {
+            glDeleteTextures(1, &m_textureID);
+            m_textureID = 0;
+        }
     }
 
     bool Texture::loadTexture(const std::string& path, bool flipVertical) {
+        VALKRON_CORE_ASSERT(m_textureID != 0, "Texture::loadTexture called on invalid texture object");
+        VALKRON_CORE_ASSERT(!path.empty(), "Texture path must not be empty");
+
         const std::filesystem::path resolvedPath = FileSystem::resolveExistingPath(path);
         const std::string resolvedPathString = resolvedPath.string();
+
+        if (resolvedPathString.empty()) {
+            LOG_ERROR("Resolved texture path is empty for input: " + path);
+            return false;
+        }
 
         stbi_set_flip_vertically_on_load(flipVertical ? 1 : 0);
 
@@ -131,6 +143,9 @@ namespace Valkron {
     }
 
     void Texture::createEmpty(int width, int height, unsigned int internalFormat, unsigned int format, unsigned int type) {
+        VALKRON_CORE_ASSERT(m_textureID != 0, "Texture::createEmpty called on invalid texture object");
+        VALKRON_CORE_ASSERT(width > 0 && height > 0, "Texture dimensions must be positive");
+
         m_width = width;
         m_height = height;
 
@@ -143,6 +158,7 @@ namespace Valkron {
     }
 
     void Texture::bind(unsigned int slot) const {
+        VALKRON_CORE_ASSERT(m_textureID != 0, "Attempted to bind invalid texture object");
         glActiveTexture(GL_TEXTURE0 + slot);
         glBindTexture(GL_TEXTURE_2D, m_textureID);
     }

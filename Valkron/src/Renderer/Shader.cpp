@@ -15,10 +15,14 @@ namespace Valkron {
         const std::string vertexSource = readFile(vertexPath);
         const std::string fragmentSource = readFile(fragmentPath);
 
+        VALKRON_CORE_ASSERT(!vertexSource.empty(), "Vertex shader source is empty");
+        VALKRON_CORE_ASSERT(!fragmentSource.empty(), "Fragment shader source is empty");
+
         unsigned int vertexShader = compileShader(GL_VERTEX_SHADER, vertexSource);
         unsigned int fragmentShader = compileShader(GL_FRAGMENT_SHADER, fragmentSource);
 
         m_programID = glCreateProgram();
+        VALKRON_CORE_ASSERT(m_programID != 0, "Failed to create shader program");
         glAttachShader(m_programID, vertexShader);
         glAttachShader(m_programID, fragmentShader);
         glLinkProgram(m_programID);
@@ -29,10 +33,14 @@ namespace Valkron {
     }
 
     Shader::~Shader() {
-        glDeleteProgram(m_programID);
+        if (m_programID != 0) {
+            glDeleteProgram(m_programID);
+            m_programID = 0;
+        }
     }
 
     void Shader::bind() const {
+        VALKRON_CORE_ASSERT(m_programID != 0, "Attempted to bind invalid shader program");
         glUseProgram(m_programID);
     }
 
@@ -49,22 +57,27 @@ namespace Valkron {
     }
 
     void Shader::setVec2(const std::string& name, const float* value) const {
+        VALKRON_CORE_ASSERT(value != nullptr, "setVec2 requires non-null value pointer");
         glUniform2fv(getUniformLocation(name), 1, value);
     }
 
     void Shader::setVec3(const std::string& name, const float* value) const {
+        VALKRON_CORE_ASSERT(value != nullptr, "setVec3 requires non-null value pointer");
         glUniform3fv(getUniformLocation(name), 1, value);
     }
 
     void Shader::setVec4(const std::string& name, const float* value) const {
+        VALKRON_CORE_ASSERT(value != nullptr, "setVec4 requires non-null value pointer");
         glUniform4fv(getUniformLocation(name), 1, value);
     }
 
     void Shader::setMat3(const std::string& name, const float* value) const {
+        VALKRON_CORE_ASSERT(value != nullptr, "setMat3 requires non-null value pointer");
         glUniformMatrix3fv(getUniformLocation(name), 1, GL_FALSE, value);
     }
 
     void Shader::setMat4(const std::string& name, const float* value) const {
+        VALKRON_CORE_ASSERT(value != nullptr, "setMat4 requires non-null value pointer");
         glUniformMatrix4fv(getUniformLocation(name), 1, GL_FALSE, value);
     }
 
@@ -82,7 +95,9 @@ namespace Valkron {
     }
 
     unsigned int Shader::compileShader(unsigned int type, const std::string& source) {
+        VALKRON_CORE_ASSERT(!source.empty(), "Cannot compile shader from empty source");
         unsigned int shader = glCreateShader(type);
+        VALKRON_CORE_ASSERT(shader != 0, "Failed to create shader object");
         const char* sourceCStr = source.c_str();
         glShaderSource(shader, 1, &sourceCStr, nullptr);
         glCompileShader(shader);
@@ -95,12 +110,15 @@ namespace Valkron {
             std::vector<char> infoLog(static_cast<std::size_t>(logLength));
             glGetShaderInfoLog(shader, logLength, nullptr, infoLog.data());
             LOG_ERROR("Shader compilation failed: " + std::string(infoLog.begin(), infoLog.end()));
+            glDeleteShader(shader);
+            VALKRON_CORE_ASSERT(false, "Shader compilation failed");
         }
 
         return shader;
     }
 
     void Shader::checkProgramLink(unsigned int programID) {
+        VALKRON_CORE_ASSERT(programID != 0, "Invalid shader program ID passed to link check");
         int success = 0;
         glGetProgramiv(programID, GL_LINK_STATUS, &success);
         if (!success) {
@@ -109,6 +127,7 @@ namespace Valkron {
             std::vector<char> infoLog(static_cast<std::size_t>(logLength));
             glGetProgramInfoLog(programID, logLength, nullptr, infoLog.data());
             LOG_ERROR("Shader program link failed: " + std::string(infoLog.begin(), infoLog.end()));
+            VALKRON_CORE_ASSERT(false, "Shader program link failed");
         }
     }
 

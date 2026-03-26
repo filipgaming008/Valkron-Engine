@@ -19,8 +19,11 @@ namespace Valkron {
     }
 
     Application::Application() {
-        m_window = std::make_unique<Window>();
-        m_inputManager.init(m_window->getWindow());
+        window = std::make_unique<Window>();
+        VALKRON_CORE_ASSERT(window != nullptr, "Failed to allocate Window object");
+        VALKRON_CORE_ASSERT(window->getWindow() != nullptr, "Window initialization failed");
+
+        m_inputManager.init(window->getWindow());
         m_inputManager.setEventCallback([this](Event& event) {
             onEvent(event);
         });
@@ -28,7 +31,7 @@ namespace Valkron {
         Renderer::init();
         int width = 0;
         int height = 0;
-        glfwGetFramebufferSize(m_window->getWindow(), &width, &height);
+        glfwGetFramebufferSize(window->getWindow(), &width, &height);
         Renderer::onWindowResize(width, height);
 
         m_inputManager.pushLayer(&m_layer);
@@ -45,6 +48,7 @@ namespace Valkron {
     }
 
     void Application::Run() {
+        VALKRON_CORE_ASSERT(window != nullptr && window->getWindow() != nullptr, "Application run requires a valid window");
 
         float lastTime = 0.0f;
 
@@ -63,7 +67,7 @@ namespace Valkron {
             m_layer.onUpdate(delta_time);
             Renderer::endFrame();
 
-            m_window->Update();
+            window->Update();
         }
     }
 

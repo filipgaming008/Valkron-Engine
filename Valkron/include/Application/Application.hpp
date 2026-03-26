@@ -14,7 +14,7 @@ namespace Valkron {
     class VALKRON_API Application {
         private:
             bool isRunning = true;
-            std::unique_ptr<Window> m_window = nullptr;
+            std::unique_ptr<Window> window = nullptr;
             InputManager& m_inputManager = InputManager::getInstance();
             UILayer m_layer{0};
 

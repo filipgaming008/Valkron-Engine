@@ -5,6 +5,7 @@ namespace Valkron {
 
     Window::Window() {
         if (!glfwInit()) {
+            LOG_ERROR("Failed to initialize GLFW");
             VALKRON_CORE_ASSERT(false, "Failed to initialize GLFW");
             return;
         }
@@ -13,26 +14,37 @@ namespace Valkron {
         glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 6);
         glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
 
-        window = glfwCreateWindow(800, 600, "Valkron Engine", nullptr, nullptr);
+        m_window = glfwCreateWindow(800, 600, "Valkron Engine", nullptr, nullptr);
 
-        if (!window) {
+        if (!m_window) {
+            LOG_ERROR("Failed to create GLFW window");
             VALKRON_CORE_ASSERT(false, "Failed to create GLFW window");
             glfwTerminate();
             return;
         }
 
-        glfwMakeContextCurrent(window);
+        glfwMakeContextCurrent(m_window);
 
         int gladVersion = gladLoadGL((GLADloadfunc)glfwGetProcAddress);
+        if (gladVersion == 0) {
+            LOG_ERROR("Failed to initialize GLAD");
+            glfwDestroyWindow(m_window);
+            m_window = nullptr;
+            glfwTerminate();
+        }
         VALKRON_CORE_ASSERT(gladVersion != 0, "Failed to initialize GLAD");
     }
 
     Window::~Window() {
-        glfwDestroyWindow(window);
+        if (m_window) {
+            glfwDestroyWindow(m_window);
+            m_window = nullptr;
+        }
         glfwTerminate();
     }
 
     void Window::Update() {
-        glfwSwapBuffers(window);
+        VALKRON_CORE_ASSERT(m_window != nullptr, "Window::Update called with null GLFW window");
+        glfwSwapBuffers(m_window);
     }
 }

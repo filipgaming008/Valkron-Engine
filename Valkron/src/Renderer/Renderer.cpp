@@ -35,6 +35,9 @@ namespace Valkron {
         RendererData s_data;
 
         void rebuildFrameBufferAttachments() {
+            VALKRON_CORE_ASSERT(s_data.frameTexture != nullptr, "Frame texture must exist before rebuilding attachments");
+            VALKRON_CORE_ASSERT(s_data.depthBuffer != nullptr, "Depth buffer must exist before rebuilding attachments");
+
             if (!s_data.frameBuffer || s_data.viewportWidth <= 0 || s_data.viewportHeight <= 0) {
                 return;
             }
@@ -47,6 +50,7 @@ namespace Valkron {
             s_data.frameBuffer->attachDepthBuffer(s_data.depthBuffer->getID());
             if (!s_data.frameBuffer->isComplete()) {
                 LOG_ERROR("FrameBuffer is not complete after resize/update");
+                VALKRON_CORE_ASSERT(false, "Framebuffer is incomplete after attachment rebuild");
             }
             s_data.frameBuffer->unbind();
         }
@@ -54,6 +58,7 @@ namespace Valkron {
 
     void Renderer::init() {
         if (s_data.initialized) {
+            LOG_WARN("Renderer::init called more than once. Ignoring duplicate initialization.");
             return;
         }
 
@@ -96,6 +101,10 @@ namespace Valkron {
         s_data.frameTexture = std::make_unique<Texture>();
         s_data.depthBuffer = std::make_unique<DepthBuffer>();
 
+        VALKRON_CORE_ASSERT(s_data.frameBuffer != nullptr, "Failed to create FrameBuffer");
+        VALKRON_CORE_ASSERT(s_data.frameTexture != nullptr, "Failed to create frame texture");
+        VALKRON_CORE_ASSERT(s_data.depthBuffer != nullptr, "Failed to create depth buffer");
+
         s_data.initialized = true;
     }
 
@@ -116,8 +125,17 @@ namespace Valkron {
 
     void Renderer::beginFrame() {
         if (!s_data.initialized || s_data.viewportWidth <= 0 || s_data.viewportHeight <= 0) {
+            if (!s_data.initialized) {
+                LOG_ERROR("Renderer::beginFrame called before Renderer::init");
+            }
             return;
         }
+
+        VALKRON_CORE_ASSERT(s_data.frameBuffer != nullptr, "FrameBuffer is not initialized");
+        VALKRON_CORE_ASSERT(s_data.shader != nullptr, "Shader is not initialized");
+        VALKRON_CORE_ASSERT(s_data.vertexArray != nullptr, "VertexArray is not initialized");
+        VALKRON_CORE_ASSERT(s_data.indexBuffer != nullptr, "IndexBuffer is not initialized");
+        VALKRON_CORE_ASSERT(s_data.camera != nullptr, "Camera is not initialized");
 
         s_data.frameBuffer->bind();
         RenderCommand::setViewport(0, 0, s_data.viewportWidth, s_data.viewportHeight);
@@ -146,6 +164,8 @@ namespace Valkron {
             return;
         }
 
+        VALKRON_CORE_ASSERT(s_data.frameBuffer != nullptr, "FrameBuffer is not initialized");
+
         s_data.frameBuffer->unbind();
         s_data.frameBuffer->blitToDefault(
             s_data.viewportWidth,
@@ -157,6 +177,11 @@ namespace Valkron {
     }
 
     void Renderer::onWindowResize(int width, int height) {
+        if (width <= 0 || height <= 0) {
+            LOG_WARN("Ignoring window resize with non-positive size: " + std::to_string(width) + "x" + std::to_string(height));
+            return;
+        }
+
         s_data.viewportWidth = width;
         s_data.viewportHeight = height;
         RenderCommand::setViewport(0, 0, width, height);
