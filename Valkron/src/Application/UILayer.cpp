@@ -1,7 +1,8 @@
 #include "Application/UILayer.hpp"
 #include "Event/Event.hpp"
-#include "GLFW/glfw3.h"
 #include "Core/Log.hpp"
+
+#include "GLFW/glfw3.h"
 
 namespace Valkron {
 

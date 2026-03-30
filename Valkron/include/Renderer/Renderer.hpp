@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Core/Core.hpp"
+#include "Renderer/Camera.hpp"
 
 namespace Valkron {
 
@@ -10,6 +11,7 @@ namespace Valkron {
             static void shutdown();
             static void beginFrame();
             static void endFrame();
+            static void setCameraType(CameraType type);
             static void onWindowResize(int width, int height);
     };
 

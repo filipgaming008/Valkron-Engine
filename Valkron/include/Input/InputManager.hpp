@@ -1,10 +1,12 @@
 #pragma once
 
 #include "Core/Core.hpp"
+#include "Core/Log.hpp"
 #include "Event/Event.hpp"
+
 #include "GLFW/glfw3.h"
 #include "glm/glm.hpp"
-#include "Core/Log.hpp"
+
 #include <functional>
 #include <unordered_map>
 #include <vector>

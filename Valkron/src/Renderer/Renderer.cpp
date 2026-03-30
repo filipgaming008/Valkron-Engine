@@ -95,7 +95,7 @@ namespace Valkron {
             glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, fallbackWhite);
         }
 
-        s_data.camera = std::make_unique<Camera>();
+        s_data.camera = std::make_unique<Camera>(CameraType::Perspective);
 
         s_data.frameBuffer = std::make_unique<FrameBuffer>();
         s_data.frameTexture = std::make_unique<Texture>();
@@ -174,6 +174,15 @@ namespace Valkron {
             s_data.viewportHeight,
             GL_COLOR_BUFFER_BIT
         );
+    }
+
+    void Renderer::setCameraType(CameraType type) {
+        if (!s_data.initialized || s_data.camera == nullptr) {
+            LOG_WARN("Renderer::setCameraType called before camera initialization");
+            return;
+        }
+
+        s_data.camera->setType(type);
     }
 
     void Renderer::onWindowResize(int width, int height) {

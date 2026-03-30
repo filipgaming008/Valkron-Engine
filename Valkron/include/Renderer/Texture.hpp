@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Core/Core.hpp"
+
 #include <string>
 
 namespace Valkron {

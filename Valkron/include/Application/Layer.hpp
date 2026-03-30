@@ -2,6 +2,7 @@
 
 #include "Core/Core.hpp"
 #include "Event/Event.hpp"
+
 #include <string>
 
 namespace Valkron {

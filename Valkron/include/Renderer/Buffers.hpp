@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Core/Core.hpp"
+
 #include <cstddef>
 #include <cstdint>
 #include <vector>

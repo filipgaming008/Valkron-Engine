@@ -7,6 +7,7 @@
 #include "Application/Layer.hpp"
 #include "Application/UILayer.hpp"
 #include "Core/Log.hpp"
+
 #include <memory>
 
 namespace Valkron {

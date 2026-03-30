@@ -2,7 +2,6 @@ cmake_minimum_required(VERSION 4.2 FATAL_ERROR)
 project(Valkron VERSION 0.0.1)
 
 # Dependencies
-# Add GLFW as a submodule
 if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/vendor/glfw/CMakeLists.txt")
     message(FATAL_ERROR "GLFW submodule not found! Please run: git submodule update --init --recursive")
 endif()
