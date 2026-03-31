@@ -29,10 +29,7 @@ set_target_properties(${PROJECT_NAME} PROPERTIES
 add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:${PROJECT_NAME}>/assets"
     COMMAND ${CMAKE_COMMAND} -E copy_directory
-        "${CMAKE_SOURCE_DIR}/Valkron/assets/shaders"
-        "$<TARGET_FILE_DIR:${PROJECT_NAME}>/assets/shaders"
-    COMMAND ${CMAKE_COMMAND} -E copy_directory
-        "${CMAKE_SOURCE_DIR}/Valkron/assets/textures"
-        "$<TARGET_FILE_DIR:${PROJECT_NAME}>/assets/textures"
-    COMMENT "Copying shaders and textures to executable output directory"
+        "${CMAKE_SOURCE_DIR}/Valkron/assets"
+        "$<TARGET_FILE_DIR:${PROJECT_NAME}>/assets"
+    COMMENT "Copying app assets (shaders, textures, fonts) to executable output directory"
 )

@@ -19,6 +19,12 @@ if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/vendor/stb/stb_image.h")
     message(FATAL_ERROR "stb submodule not found! Please run: git submodule update --init --recursive")
 endif()
 
+if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/vendor/freetype/CMakeLists.txt")
+    message(FATAL_ERROR "FreeType submodule not found! Please run: git submodule update --init --recursive")
+endif()
+add_subdirectory(vendor/freetype)
+set_target_properties(freetype PROPERTIES POSITION_INDEPENDENT_CODE ON)
+
 # Add source & header files
 file(GLOB_RECURSE PROJECT_HEADERS CONFIGURE_DEPENDS
     ${CMAKE_CURRENT_SOURCE_DIR}/include/*.hpp
@@ -36,12 +42,13 @@ target_include_directories(${PROJECT_NAME}
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src
     PUBLIC  ${CMAKE_CURRENT_SOURCE_DIR}/vendor/glfw/include
     PUBLIC  ${CMAKE_CURRENT_SOURCE_DIR}/vendor/glm
+    PUBLIC  ${CMAKE_CURRENT_SOURCE_DIR}/vendor/freetype/include
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/vendor/stb
 )
 
 # Link GLFW and OpenGL
 find_package(OpenGL REQUIRED)
-target_link_libraries(${PROJECT_NAME} PRIVATE glfw OpenGL::GL glad_gl_core_46)
+target_link_libraries(${PROJECT_NAME} PRIVATE glfw OpenGL::GL glad_gl_core_46 freetype)
 
 # Platform detection
 if(UNIX AND NOT APPLE)

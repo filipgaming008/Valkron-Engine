@@ -16,68 +16,66 @@
 
 namespace Valkron {
 
-    namespace {
-        bool loadAsciiPpmP3(const std::string& path, int& width, int& height, int& channels, std::vector<unsigned char>& outPixels, bool flipVertical) {
-            std::ifstream file(path);
-            if (!file.is_open()) {
-                return false;
-            }
-
-            std::vector<std::string> tokens;
-            std::string line;
-            while (std::getline(file, line)) {
-                const auto commentPos = line.find('#');
-                if (commentPos != std::string::npos) {
-                    line = line.substr(0, commentPos);
-                }
-
-                std::istringstream lineStream(line);
-                std::string token;
-                while (lineStream >> token) {
-                    tokens.push_back(token);
-                }
-            }
-
-            if (tokens.size() < 4 || tokens[0] != "P3") {
-                return false;
-            }
-
-            std::size_t index = 1;
-            width = std::stoi(tokens[index++]);
-            height = std::stoi(tokens[index++]);
-            const int maxValue = std::stoi(tokens[index++]);
-
-            if (width <= 0 || height <= 0 || maxValue <= 0) {
-                return false;
-            }
-
-            channels = 3;
-            const std::size_t expectedValues = static_cast<std::size_t>(width) * static_cast<std::size_t>(height) * 3;
-            if (tokens.size() - index < expectedValues) {
-                return false;
-            }
-
-            outPixels.resize(expectedValues);
-            for (std::size_t i = 0; i < expectedValues; ++i) {
-                const int value = std::stoi(tokens[index + i]);
-                const int scaled = static_cast<int>((static_cast<float>(value) / static_cast<float>(maxValue)) * 255.0f);
-                outPixels[i] = static_cast<unsigned char>(std::clamp(scaled, 0, 255));
-            }
-
-            if (flipVertical) {
-                const std::size_t rowBytes = static_cast<std::size_t>(width) * 3;
-                std::vector<unsigned char> tempRow(rowBytes);
-                for (int y = 0; y < height / 2; ++y) {
-                    unsigned char* top = outPixels.data() + static_cast<std::size_t>(y) * rowBytes;
-                    unsigned char* bottom = outPixels.data() + static_cast<std::size_t>(height - 1 - y) * rowBytes;
-                    std::copy(top, top + rowBytes, tempRow.begin());
-                    std::copy(bottom, bottom + rowBytes, top);
-                    std::copy(tempRow.begin(), tempRow.end(), bottom);
-                }
-            }
-
-            return true;
+    static bool loadAsciiPpmP3(const std::string& path, int& width, int& height, int& channels, std::vector<unsigned char>& outPixels, bool flipVertical) {
+        std::ifstream file(path);
+        if (!file.is_open()) {
+            return false;
         }
+
+        std::vector<std::string> tokens;
+        std::string line;
+        while (std::getline(file, line)) {
+            const auto commentPos = line.find('#');
+            if (commentPos != std::string::npos) {
+                line = line.substr(0, commentPos);
+            }
+
+            std::istringstream lineStream(line);
+            std::string token;
+            while (lineStream >> token) {
+                tokens.push_back(token);
+            }
+        }
+
+        if (tokens.size() < 4 || tokens[0] != "P3") {
+            return false;
+        }
+
+        std::size_t index = 1;
+        width = std::stoi(tokens[index++]);
+        height = std::stoi(tokens[index++]);
+        const int maxValue = std::stoi(tokens[index++]);
+
+        if (width <= 0 || height <= 0 || maxValue <= 0) {
+            return false;
+        }
+
+        channels = 3;
+        const std::size_t expectedValues = static_cast<std::size_t>(width) * static_cast<std::size_t>(height) * 3;
+        if (tokens.size() - index < expectedValues) {
+            return false;
+        }
+
+        outPixels.resize(expectedValues);
+        for (std::size_t i = 0; i < expectedValues; ++i) {
+            const int value = std::stoi(tokens[index + i]);
+            const int scaled = static_cast<int>((static_cast<float>(value) / static_cast<float>(maxValue)) * 255.0f);
+            outPixels[i] = static_cast<unsigned char>(std::clamp(scaled, 0, 255));
+        }
+
+        if (flipVertical) {
+            const std::size_t rowBytes = static_cast<std::size_t>(width) * 3;
+            std::vector<unsigned char> tempRow(rowBytes);
+            for (int y = 0; y < height / 2; ++y) {
+                unsigned char* top = outPixels.data() + static_cast<std::size_t>(y) * rowBytes;
+                unsigned char* bottom = outPixels.data() + static_cast<std::size_t>(height - 1 - y) * rowBytes;
+                std::copy(top, top + rowBytes, tempRow.begin());
+                std::copy(bottom, bottom + rowBytes, top);
+                std::copy(tempRow.begin(), tempRow.end(), bottom);
+            }
+        }
+
+        return true;
     }
 
     Texture::Texture() {
