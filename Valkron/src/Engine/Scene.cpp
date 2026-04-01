@@ -1,6 +1,9 @@
 #include "Engine/Scene.hpp"
 
 #include <algorithm>
+#include <cstddef>
+#include <optional>
+#include <string>
 #include <utility>
 
 namespace Valkron {
@@ -25,28 +28,177 @@ namespace Valkron {
     }
 
     void Scene::addEntity(std::string entityName) {
-        if (entityName.empty()) {
-            return;
-        }
-
-        const auto it = std::find(m_entities.begin(), m_entities.end(), entityName);
-        if (it == m_entities.end()) {
-            m_entities.push_back(std::move(entityName));
-        }
+        const std::string uniqueName = makeUniqueEntityName(entityName);
+        m_entities.push_back(SceneEntity{uniqueName, SceneTransform{}, -1});
+        m_entityNameCacheDirty = true;
     }
 
-    bool Scene::removeEntity(const std::string& entityName) {
-        const auto it = std::find(m_entities.begin(), m_entities.end(), entityName);
-        if (it == m_entities.end()) {
+    bool Scene::renameEntity(const std::string& oldName, std::string newName) {
+        if (newName.empty()) {
             return false;
         }
 
-        m_entities.erase(it);
+        const std::optional<std::size_t> entityIndex = findEntityIndex(oldName);
+        if (!entityIndex.has_value()) {
+            return false;
+        }
+
+        const std::optional<std::size_t> conflictingEntity = findEntityIndex(newName);
+        if (conflictingEntity.has_value() && conflictingEntity.value() != entityIndex.value()) {
+            return false;
+        }
+
+        m_entities[entityIndex.value()].name = std::move(newName);
+        m_entityNameCacheDirty = true;
+        return true;
+    }
+
+    bool Scene::removeEntity(const std::string& entityName) {
+        const std::optional<std::size_t> entityIndex = findEntityIndex(entityName);
+        if (!entityIndex.has_value()) {
+            return false;
+        }
+
+        const int removedIndex = static_cast<int>(entityIndex.value());
+        m_entities.erase(m_entities.begin() + static_cast<std::ptrdiff_t>(removedIndex));
+
+        for (SceneEntity& entity : m_entities) {
+            if (entity.parentIndex == removedIndex) {
+                entity.parentIndex = -1;
+                continue;
+            }
+
+            if (entity.parentIndex > removedIndex) {
+                --entity.parentIndex;
+            }
+        }
+
+        m_entityNameCacheDirty = true;
         return true;
     }
 
     const std::vector<std::string>& Scene::getEntities() const {
+        if (m_entityNameCacheDirty) {
+            refreshEntityNameCache();
+        }
+
+        return m_entityNameCache;
+    }
+
+    const std::vector<SceneEntity>& Scene::getEntityData() const {
         return m_entities;
+    }
+
+    std::optional<std::size_t> Scene::findEntityIndex(const std::string& entityName) const {
+        const auto it = std::find_if(m_entities.begin(), m_entities.end(), [&entityName](const SceneEntity& entity) {
+            return entity.name == entityName;
+        });
+
+        if (it == m_entities.end()) {
+            return std::nullopt;
+        }
+
+        return static_cast<std::size_t>(std::distance(m_entities.begin(), it));
+    }
+
+    SceneEntity* Scene::getEntityByIndex(std::size_t index) {
+        if (index >= m_entities.size()) {
+            return nullptr;
+        }
+
+        return &m_entities[index];
+    }
+
+    const SceneEntity* Scene::getEntityByIndex(std::size_t index) const {
+        if (index >= m_entities.size()) {
+            return nullptr;
+        }
+
+        return &m_entities[index];
+    }
+
+    bool Scene::setEntityParent(std::size_t entityIndex, std::optional<std::size_t> parentIndex) {
+        if (entityIndex >= m_entities.size()) {
+            return false;
+        }
+
+        if (!parentIndex.has_value()) {
+            m_entities[entityIndex].parentIndex = -1;
+            return true;
+        }
+
+        if (parentIndex.value() >= m_entities.size() || parentIndex.value() == entityIndex) {
+            return false;
+        }
+
+        if (wouldCreateParentingCycle(entityIndex, parentIndex.value())) {
+            return false;
+        }
+
+        m_entities[entityIndex].parentIndex = static_cast<int>(parentIndex.value());
+        return true;
+    }
+
+    bool Scene::setEntityParentByName(const std::string& entityName, std::optional<std::string> parentName) {
+        const std::optional<std::size_t> entityIndex = findEntityIndex(entityName);
+        if (!entityIndex.has_value()) {
+            return false;
+        }
+
+        if (!parentName.has_value() || parentName->empty()) {
+            return setEntityParent(entityIndex.value(), std::nullopt);
+        }
+
+        const std::optional<std::size_t> parentIndex = findEntityIndex(parentName.value());
+        if (!parentIndex.has_value()) {
+            return false;
+        }
+
+        return setEntityParent(entityIndex.value(), parentIndex.value());
+    }
+
+    std::string Scene::makeUniqueEntityName(const std::string& baseName) const {
+        std::string resolvedBaseName = baseName;
+        if (resolvedBaseName.empty()) {
+            resolvedBaseName = "Entity";
+        }
+
+        if (!findEntityIndex(resolvedBaseName).has_value()) {
+            return resolvedBaseName;
+        }
+
+        int suffix = 1;
+        for (;;) {
+            const std::string candidateName = resolvedBaseName + "_" + std::to_string(suffix);
+            if (!findEntityIndex(candidateName).has_value()) {
+                return candidateName;
+            }
+
+            ++suffix;
+        }
+    }
+
+    bool Scene::wouldCreateParentingCycle(std::size_t entityIndex, std::size_t parentIndex) const {
+        int currentParentIndex = static_cast<int>(parentIndex);
+        while (currentParentIndex >= 0 && currentParentIndex < static_cast<int>(m_entities.size())) {
+            if (currentParentIndex == static_cast<int>(entityIndex)) {
+                return true;
+            }
+
+            currentParentIndex = m_entities[static_cast<std::size_t>(currentParentIndex)].parentIndex;
+        }
+
+        return false;
+    }
+
+    void Scene::refreshEntityNameCache() const {
+        m_entityNameCache.clear();
+        m_entityNameCache.reserve(m_entities.size());
+        for (const SceneEntity& entity : m_entities) {
+            m_entityNameCache.push_back(entity.name);
+        }
+
+        m_entityNameCacheDirty = false;
     }
 
     void Scene::addAsset(std::string name, std::string path) {

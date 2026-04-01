@@ -39,6 +39,7 @@ set(IMGUI_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/vendor/imgui/imgui_draw.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/vendor/imgui/imgui_tables.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/vendor/imgui/imgui_widgets.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/vendor/imgui/misc/cpp/imgui_stdlib.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/vendor/imgui/backends/imgui_impl_glfw.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/vendor/imgui/backends/imgui_impl_opengl3.cpp
 )
@@ -47,6 +48,7 @@ add_library(imgui STATIC ${IMGUI_SOURCES})
 set_target_properties(imgui PROPERTIES POSITION_INDEPENDENT_CODE ON)
 target_include_directories(imgui
     PUBLIC  ${CMAKE_CURRENT_SOURCE_DIR}/vendor/imgui
+    PUBLIC  ${CMAKE_CURRENT_SOURCE_DIR}/vendor/imgui/misc/cpp
     PUBLIC  ${CMAKE_CURRENT_SOURCE_DIR}/vendor/imgui/backends
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/vendor/glfw/include
 )

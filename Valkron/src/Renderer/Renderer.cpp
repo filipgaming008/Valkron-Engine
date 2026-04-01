@@ -14,9 +14,13 @@
 #include "backends/imgui_impl_opengl3.h"
 #include "glad/gl.h"
 
+#include "glm/gtc/matrix_transform.hpp"
 #include "glm/gtc/type_ptr.hpp"
+#include "glm/trigonometric.hpp"
 
+#include <algorithm>
 #include <memory>
+#include <vector>
 
 namespace Valkron {
 
@@ -26,6 +30,11 @@ namespace Valkron {
         std::unique_ptr<FrameBuffer> frameBuffer;
         std::unique_ptr<Texture> frameTexture;
         std::unique_ptr<DepthBuffer> depthBuffer;
+
+        glm::mat4 modelMatrix{1.0f};
+        std::vector<glm::mat4> sceneEntityTransforms;
+        std::vector<glm::vec3> lightEntityPositions;
+        int selectedEntityRenderIndex = -1;
 
         int viewportWidth = 0;
         int viewportHeight = 0;
@@ -37,64 +46,70 @@ namespace Valkron {
 
     static RendererData s_data;
 
-    static void applyModernImGuiStyle() {
+    static void applyRetroImGuiStyle() {
         ImGuiStyle& style = ImGui::GetStyle();
-        style.WindowRounding = 10.0f;
-        style.ChildRounding = 8.0f;
-        style.FrameRounding = 7.0f;
-        style.PopupRounding = 8.0f;
-        style.ScrollbarRounding = 9.0f;
-        style.GrabRounding = 7.0f;
-        style.TabRounding = 8.0f;
+        style.WindowRounding = 2.0f;
+        style.ChildRounding = 2.0f;
+        style.FrameRounding = 2.0f;
+        style.PopupRounding = 2.0f;
+        style.ScrollbarRounding = 2.0f;
+        style.GrabRounding = 2.0f;
+        style.TabRounding = 2.0f;
         style.WindowBorderSize = 1.0f;
-        style.FrameBorderSize = 0.0f;
-        style.TabBorderSize = 0.0f;
-        style.WindowPadding = ImVec2(12.0f, 10.0f);
-        style.FramePadding = ImVec2(10.0f, 6.0f);
-        style.ItemSpacing = ImVec2(9.0f, 8.0f);
-        style.ItemInnerSpacing = ImVec2(8.0f, 6.0f);
+        style.FrameBorderSize = 1.0f;
+        style.TabBorderSize = 1.0f;
+        style.PopupBorderSize = 1.0f;
+        style.WindowPadding = ImVec2(8.0f, 7.0f);
+        style.FramePadding = ImVec2(7.0f, 4.0f);
+        style.ItemSpacing = ImVec2(7.0f, 5.0f);
+        style.ItemInnerSpacing = ImVec2(6.0f, 4.0f);
         style.IndentSpacing = 18.0f;
+        style.AntiAliasedLines = true;
+        style.AntiAliasedFill = true;
 
         ImVec4* colors = style.Colors;
-        colors[ImGuiCol_Text] = ImVec4(0.90f, 0.94f, 0.97f, 1.00f);
-        colors[ImGuiCol_TextDisabled] = ImVec4(0.52f, 0.58f, 0.64f, 1.00f);
-        colors[ImGuiCol_WindowBg] = ImVec4(0.08f, 0.10f, 0.12f, 0.97f);
-        colors[ImGuiCol_ChildBg] = ImVec4(0.10f, 0.12f, 0.14f, 0.85f);
-        colors[ImGuiCol_PopupBg] = ImVec4(0.09f, 0.11f, 0.14f, 0.98f);
-        colors[ImGuiCol_Border] = ImVec4(0.21f, 0.27f, 0.32f, 0.85f);
-        colors[ImGuiCol_FrameBg] = ImVec4(0.13f, 0.16f, 0.20f, 0.95f);
-        colors[ImGuiCol_FrameBgHovered] = ImVec4(0.17f, 0.23f, 0.29f, 1.00f);
-        colors[ImGuiCol_FrameBgActive] = ImVec4(0.20f, 0.30f, 0.37f, 1.00f);
-        colors[ImGuiCol_TitleBg] = ImVec4(0.09f, 0.12f, 0.15f, 1.00f);
-        colors[ImGuiCol_TitleBgActive] = ImVec4(0.12f, 0.18f, 0.23f, 1.00f);
-        colors[ImGuiCol_MenuBarBg] = ImVec4(0.09f, 0.12f, 0.15f, 1.00f);
-        colors[ImGuiCol_ScrollbarBg] = ImVec4(0.08f, 0.10f, 0.12f, 0.80f);
-        colors[ImGuiCol_ScrollbarGrab] = ImVec4(0.24f, 0.36f, 0.44f, 0.85f);
-        colors[ImGuiCol_ScrollbarGrabHovered] = ImVec4(0.29f, 0.48f, 0.58f, 0.95f);
-        colors[ImGuiCol_ScrollbarGrabActive] = ImVec4(0.32f, 0.57f, 0.69f, 1.00f);
-        colors[ImGuiCol_CheckMark] = ImVec4(0.40f, 0.78f, 0.92f, 1.00f);
-        colors[ImGuiCol_SliderGrab] = ImVec4(0.34f, 0.70f, 0.83f, 0.90f);
-        colors[ImGuiCol_SliderGrabActive] = ImVec4(0.42f, 0.84f, 0.98f, 1.00f);
-        colors[ImGuiCol_Button] = ImVec4(0.16f, 0.28f, 0.35f, 0.85f);
-        colors[ImGuiCol_ButtonHovered] = ImVec4(0.22f, 0.41f, 0.50f, 1.00f);
-        colors[ImGuiCol_ButtonActive] = ImVec4(0.26f, 0.49f, 0.59f, 1.00f);
-        colors[ImGuiCol_Header] = ImVec4(0.15f, 0.30f, 0.37f, 0.85f);
-        colors[ImGuiCol_HeaderHovered] = ImVec4(0.24f, 0.46f, 0.55f, 0.95f);
-        colors[ImGuiCol_HeaderActive] = ImVec4(0.28f, 0.55f, 0.66f, 1.00f);
-        colors[ImGuiCol_Separator] = ImVec4(0.20f, 0.30f, 0.37f, 1.00f);
-        colors[ImGuiCol_ResizeGrip] = ImVec4(0.24f, 0.45f, 0.54f, 0.25f);
-        colors[ImGuiCol_ResizeGripHovered] = ImVec4(0.35f, 0.63f, 0.75f, 0.78f);
-        colors[ImGuiCol_ResizeGripActive] = ImVec4(0.40f, 0.75f, 0.89f, 0.95f);
-        colors[ImGuiCol_Tab] = ImVec4(0.12f, 0.20f, 0.26f, 0.92f);
-        colors[ImGuiCol_TabHovered] = ImVec4(0.22f, 0.39f, 0.48f, 0.95f);
-        colors[ImGuiCol_TabActive] = ImVec4(0.20f, 0.35f, 0.43f, 1.00f);
-        colors[ImGuiCol_TabUnfocused] = ImVec4(0.11f, 0.16f, 0.20f, 0.95f);
-        colors[ImGuiCol_TabUnfocusedActive] = ImVec4(0.14f, 0.23f, 0.29f, 1.00f);
-        colors[ImGuiCol_PlotLines] = ImVec4(0.68f, 0.78f, 0.90f, 1.00f);
-        colors[ImGuiCol_PlotHistogram] = ImVec4(0.89f, 0.61f, 0.34f, 1.00f);
-        colors[ImGuiCol_TextSelectedBg] = ImVec4(0.18f, 0.45f, 0.55f, 0.45f);
-        colors[ImGuiCol_DragDropTarget] = ImVec4(0.95f, 0.75f, 0.26f, 0.90f);
-        colors[ImGuiCol_NavHighlight] = ImVec4(0.37f, 0.74f, 0.89f, 1.00f);
+        colors[ImGuiCol_Text] = ImVec4(0.88f, 0.90f, 0.95f, 1.00f);
+        colors[ImGuiCol_TextDisabled] = ImVec4(0.52f, 0.56f, 0.64f, 1.00f);
+        colors[ImGuiCol_WindowBg] = ImVec4(0.10f, 0.11f, 0.14f, 1.00f);
+        colors[ImGuiCol_ChildBg] = ImVec4(0.09f, 0.10f, 0.13f, 1.00f);
+        colors[ImGuiCol_PopupBg] = ImVec4(0.12f, 0.13f, 0.16f, 0.98f);
+        colors[ImGuiCol_Border] = ImVec4(0.32f, 0.37f, 0.46f, 1.00f);
+        colors[ImGuiCol_BorderShadow] = ImVec4(0.00f, 0.00f, 0.00f, 0.00f);
+        colors[ImGuiCol_FrameBg] = ImVec4(0.15f, 0.17f, 0.22f, 1.00f);
+        colors[ImGuiCol_FrameBgHovered] = ImVec4(0.20f, 0.24f, 0.31f, 1.00f);
+        colors[ImGuiCol_FrameBgActive] = ImVec4(0.24f, 0.29f, 0.38f, 1.00f);
+        colors[ImGuiCol_TitleBg] = ImVec4(0.08f, 0.11f, 0.17f, 1.00f);
+        colors[ImGuiCol_TitleBgActive] = ImVec4(0.11f, 0.16f, 0.25f, 1.00f);
+        colors[ImGuiCol_TitleBgCollapsed] = ImVec4(0.08f, 0.11f, 0.17f, 0.82f);
+        colors[ImGuiCol_MenuBarBg] = ImVec4(0.12f, 0.14f, 0.20f, 1.00f);
+        colors[ImGuiCol_ScrollbarBg] = ImVec4(0.11f, 0.12f, 0.16f, 1.00f);
+        colors[ImGuiCol_ScrollbarGrab] = ImVec4(0.25f, 0.29f, 0.37f, 1.00f);
+        colors[ImGuiCol_ScrollbarGrabHovered] = ImVec4(0.32f, 0.37f, 0.46f, 1.00f);
+        colors[ImGuiCol_ScrollbarGrabActive] = ImVec4(0.38f, 0.44f, 0.56f, 1.00f);
+        colors[ImGuiCol_CheckMark] = ImVec4(0.49f, 0.70f, 0.98f, 1.00f);
+        colors[ImGuiCol_SliderGrab] = ImVec4(0.38f, 0.52f, 0.76f, 1.00f);
+        colors[ImGuiCol_SliderGrabActive] = ImVec4(0.49f, 0.70f, 0.98f, 1.00f);
+        colors[ImGuiCol_Button] = ImVec4(0.18f, 0.22f, 0.29f, 1.00f);
+        colors[ImGuiCol_ButtonHovered] = ImVec4(0.25f, 0.31f, 0.40f, 1.00f);
+        colors[ImGuiCol_ButtonActive] = ImVec4(0.31f, 0.38f, 0.49f, 1.00f);
+        colors[ImGuiCol_Header] = ImVec4(0.23f, 0.29f, 0.38f, 1.00f);
+        colors[ImGuiCol_HeaderHovered] = ImVec4(0.30f, 0.37f, 0.48f, 1.00f);
+        colors[ImGuiCol_HeaderActive] = ImVec4(0.36f, 0.44f, 0.58f, 1.00f);
+        colors[ImGuiCol_Separator] = ImVec4(0.28f, 0.33f, 0.42f, 1.00f);
+        colors[ImGuiCol_ResizeGrip] = ImVec4(0.45f, 0.52f, 0.66f, 0.30f);
+        colors[ImGuiCol_ResizeGripHovered] = ImVec4(0.55f, 0.64f, 0.80f, 0.72f);
+        colors[ImGuiCol_ResizeGripActive] = ImVec4(0.62f, 0.72f, 0.90f, 0.95f);
+        colors[ImGuiCol_Tab] = ImVec4(0.15f, 0.18f, 0.24f, 1.00f);
+        colors[ImGuiCol_TabHovered] = ImVec4(0.24f, 0.30f, 0.39f, 1.00f);
+        colors[ImGuiCol_TabActive] = ImVec4(0.28f, 0.35f, 0.46f, 1.00f);
+        colors[ImGuiCol_TabUnfocused] = ImVec4(0.14f, 0.17f, 0.22f, 1.00f);
+        colors[ImGuiCol_TabUnfocusedActive] = ImVec4(0.20f, 0.25f, 0.33f, 1.00f);
+        colors[ImGuiCol_PlotLines] = ImVec4(0.74f, 0.80f, 0.90f, 1.00f);
+        colors[ImGuiCol_PlotHistogram] = ImVec4(0.86f, 0.61f, 0.27f, 1.00f);
+        colors[ImGuiCol_TextSelectedBg] = ImVec4(0.30f, 0.44f, 0.66f, 0.45f);
+        colors[ImGuiCol_DragDropTarget] = ImVec4(0.49f, 0.70f, 0.98f, 0.90f);
+        colors[ImGuiCol_NavHighlight] = ImVec4(0.49f, 0.70f, 0.98f, 1.00f);
+        colors[ImGuiCol_DockingPreview] = ImVec4(0.36f, 0.52f, 0.80f, 0.70f);
     }
 
     static void renderLoadedAssets() {
@@ -119,17 +134,33 @@ namespace Valkron {
         }
 
         const float aspectRatio = static_cast<float>(s_data.viewportWidth) / static_cast<float>(s_data.viewportHeight);
-        const glm::mat4 modelMatrix(1.0f);
         const glm::mat4 viewMatrix = s_data.camera->getViewMatrix();
         const glm::mat4 projectionMatrix = s_data.camera->getProjectionMatrix(aspectRatio);
 
-        const glm::vec3 lightPosition(3.0f, 4.0f, 3.0f);
+        std::vector<glm::mat4> renderTransforms;
+        if (!s_data.sceneEntityTransforms.empty()) {
+            renderTransforms = s_data.sceneEntityTransforms;
+        } else {
+            renderTransforms.push_back(s_data.modelMatrix);
+        }
+
+        glm::vec3 lightPosition(3.0f, 4.0f, 3.0f);
+        if (!s_data.lightEntityPositions.empty()) {
+            glm::vec3 accumulatedLightPosition(0.0f, 0.0f, 0.0f);
+            for (const glm::vec3& position : s_data.lightEntityPositions) {
+                accumulatedLightPosition += position;
+            }
+
+            lightPosition = accumulatedLightPosition / static_cast<float>(s_data.lightEntityPositions.size());
+        }
+
         const glm::vec3 lightColor(1.0f, 1.0f, 1.0f);
-        const glm::vec3 ambientLight(0.15f, 0.15f, 0.18f);
+        const float ambientStrength = std::clamp(0.10f + static_cast<float>(s_data.lightEntityPositions.size()) * 0.03f, 0.10f, 0.28f);
+        const glm::vec3 ambientLight(ambientStrength, ambientStrength, ambientStrength + 0.02f);
         const glm::vec3 cameraPosition = s_data.camera->getPosition();
+        const glm::vec3 selectedHighlightColor(0.98f, 0.78f, 0.24f);
 
         shader->bind();
-        shader->setMat4("u_Model", glm::value_ptr(modelMatrix));
         shader->setMat4("u_View", glm::value_ptr(viewMatrix));
         shader->setMat4("u_Projection", glm::value_ptr(projectionMatrix));
         shader->setVec3("u_Light.position", &lightPosition.x);
@@ -137,7 +168,14 @@ namespace Valkron {
         shader->setVec3("u_Light.ambient", &ambientLight.x);
         shader->setVec3("u_ViewPos", &cameraPosition.x);
 
-        model->draw(*shader);
+        for (std::size_t entityIndex = 0; entityIndex < renderTransforms.size(); ++entityIndex) {
+            shader->setMat4("u_Model", glm::value_ptr(renderTransforms[entityIndex]));
+            shader->setVec3("u_SelectionColor", &selectedHighlightColor.x);
+
+            const float selectionMix = static_cast<int>(entityIndex) == s_data.selectedEntityRenderIndex ? 0.38f : 0.0f;
+            shader->setFloat("u_SelectionMix", selectionMix);
+            model->draw(*shader);
+        }
     }
 
     static void rebuildFrameBufferAttachments() {
@@ -173,6 +211,10 @@ namespace Valkron {
         s_data.window = window;
 
         s_data.camera = std::make_unique<Camera>(CameraType::Perspective);
+        s_data.modelMatrix = glm::mat4(1.0f);
+        s_data.sceneEntityTransforms.clear();
+        s_data.lightEntityPositions.clear();
+        s_data.selectedEntityRenderIndex = -1;
 
         s_data.frameBuffer = std::make_unique<FrameBuffer>();
         s_data.frameTexture = std::make_unique<Texture>();
@@ -184,7 +226,9 @@ namespace Valkron {
 
         IMGUI_CHECKVERSION();
         ImGui::CreateContext();
-        applyModernImGuiStyle();
+        ImGuiIO& io = ImGui::GetIO();
+        io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
+        applyRetroImGuiStyle();
 
         const bool glfwInitOk = ImGui_ImplGlfw_InitForOpenGL(s_data.window, true);
         VALKRON_CORE_ASSERT(glfwInitOk, "Failed to initialize ImGui GLFW backend");
@@ -208,6 +252,10 @@ namespace Valkron {
         s_data.frameTexture.reset();
         s_data.frameBuffer.reset();
         s_data.camera.reset();
+        s_data.modelMatrix = glm::mat4(1.0f);
+        s_data.sceneEntityTransforms.clear();
+        s_data.lightEntityPositions.clear();
+        s_data.selectedEntityRenderIndex = -1;
         s_data.viewportWidth = 0;
         s_data.viewportHeight = 0;
         s_data.windowFramebufferWidth = 0;
@@ -281,6 +329,42 @@ namespace Valkron {
         s_data.camera->setUp(up);
     }
 
+    void Renderer::setModelTransform(const glm::vec3& position, const glm::vec3& rotationDegrees, const glm::vec3& scale) {
+        if (!s_data.initialized) {
+            return;
+        }
+
+        glm::mat4 model(1.0f);
+        model = glm::translate(model, position);
+        model = glm::rotate(model, glm::radians(rotationDegrees.x), glm::vec3(1.0f, 0.0f, 0.0f));
+        model = glm::rotate(model, glm::radians(rotationDegrees.y), glm::vec3(0.0f, 1.0f, 0.0f));
+        model = glm::rotate(model, glm::radians(rotationDegrees.z), glm::vec3(0.0f, 0.0f, 1.0f));
+        model = glm::scale(model, glm::vec3(
+            std::max(0.01f, scale.x),
+            std::max(0.01f, scale.y),
+            std::max(0.01f, scale.z)
+        ));
+
+        s_data.modelMatrix = model;
+    }
+
+    void Renderer::setSceneEntityTransforms(const std::vector<glm::mat4>& entityTransforms, int selectedEntityIndex) {
+        if (!s_data.initialized) {
+            return;
+        }
+
+        s_data.sceneEntityTransforms = entityTransforms;
+        s_data.selectedEntityRenderIndex = selectedEntityIndex;
+    }
+
+    void Renderer::setLightEntityPositions(const std::vector<glm::vec3>& lightPositions) {
+        if (!s_data.initialized) {
+            return;
+        }
+
+        s_data.lightEntityPositions = lightPositions;
+    }
+
     glm::vec3 Renderer::getCameraPosition() {
         if (!s_data.initialized || s_data.camera == nullptr) {
             return glm::vec3(0.0f, 0.0f, 2.0f);
@@ -303,6 +387,25 @@ namespace Valkron {
         }
 
         return s_data.camera->getUp();
+    }
+
+    glm::mat4 Renderer::getCameraViewMatrix() {
+        if (!s_data.initialized || s_data.camera == nullptr) {
+            return glm::mat4(1.0f);
+        }
+
+        return s_data.camera->getViewMatrix();
+    }
+
+    glm::mat4 Renderer::getCameraProjectionMatrix() {
+        if (!s_data.initialized || s_data.camera == nullptr) {
+            return glm::mat4(1.0f);
+        }
+
+        const float aspectRatio = s_data.viewportHeight > 0
+            ? static_cast<float>(s_data.viewportWidth) / static_cast<float>(s_data.viewportHeight)
+            : 1.0f;
+        return s_data.camera->getProjectionMatrix(aspectRatio);
     }
 
     void Renderer::onWindowResize(int width, int height) {

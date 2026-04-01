@@ -24,6 +24,8 @@ struct Light {
 uniform Material u_Material;
 uniform Light u_Light;
 uniform vec3 u_ViewPos;
+uniform vec3 u_SelectionColor;
+uniform float u_SelectionMix;
 
 void main() {
     vec3 normal = normalize(fs_in.Normal);
@@ -43,5 +45,9 @@ void main() {
     vec3 diffuse = diff * baseColor * u_Light.color;
     vec3 specular = spec * u_Material.specularColor * u_Light.color;
 
-    FragColor = vec4(ambient + diffuse + specular, 1.0);
+    vec3 shadedColor = ambient + diffuse + specular;
+    float highlightMix = clamp(u_SelectionMix, 0.0, 1.0);
+    shadedColor = mix(shadedColor, u_SelectionColor, highlightMix);
+
+    FragColor = vec4(shadedColor, 1.0);
 }

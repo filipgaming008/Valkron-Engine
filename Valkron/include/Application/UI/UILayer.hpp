@@ -35,12 +35,19 @@ namespace Valkron {
         private:
             void appendTerminalLine(const std::string& line);
             void drawTopNavbar();
-            void drawSceneHierarchyPanel(float panelTop, float panelHeight, float panelWidth);
-            void drawSceneViewPanel(float deltaTime, float panelTop, float panelHeight, float panelX, float panelWidth);
-            void drawAssetsPanel(float panelTop, float panelHeight, float panelX, float panelWidth);
+            void drawDockspaceHost();
+            void drawSceneHierarchyPanel();
+            void drawSceneViewPanel(float deltaTime);
+            void drawInspectorPanel();
+            void drawSettingsPanel();
+            void drawDebugPanel();
+            void drawBottomPanel();
+            void drawAssetsPanel();
             void drawEngineSettingsSection();
             void syncEngineSettingsEditorState();
-            void drawTerminalPanel(float panelTop, float panelHeight, float panelWidth);
+            void drawTerminalPanel();
+            void setSelectedEntity(int entityIndex);
+            void clearEntitySelection();
             void initializeSceneCameraController();
             void updateSceneCameraController(bool sceneImageHovered);
             void syncRendererCameraFromController();
@@ -49,6 +56,7 @@ namespace Valkron {
             bool loadRuntimeShader();
             bool loadRuntimeComputeShader();
             bool loadRuntimeModel();
+            bool loadRuntimeAssetAuto();
 
             Scene m_activeScene{"Main Scene"};
             std::vector<std::string> m_terminalLines;
@@ -67,22 +75,40 @@ namespace Valkron {
             int m_pendingViewportHeight = 0;
             float m_viewportResizeDebounceTimer = 0.0f;
             float m_viewportResizeDebounceDelaySeconds = 0.12f;
+            float m_lastFrameDeltaTimeSeconds = 0.0f;
 
-                bool m_sceneViewImageHovered = false;
-                bool m_sceneViewOptionsPopupEnabled = true;
-                bool m_sceneCameraControllerInitialized = false;
-                bool m_sceneCameraInvertPan = false;
+            bool m_showSceneHierarchyPanel = true;
+            bool m_showSceneViewPanel = true;
+            bool m_showInspectorPanel = true;
+            bool m_showSettingsPanel = false;
+            bool m_showDebugPanel = false;
+            bool m_showBottomPanel = true;
+            bool m_resetLayoutRequested = true;
+            bool m_dockspaceBuilt = false;
 
-                glm::vec3 m_sceneCameraPivot{0.0f, 0.0f, 0.0f};
-                glm::vec3 m_sceneCameraUp{0.0f, 1.0f, 0.0f};
-                float m_sceneCameraDistance = 2.0f;
-                float m_sceneCameraYawRadians = 0.0f;
-                float m_sceneCameraPitchRadians = 0.0f;
-                float m_sceneCameraRotateSpeed = 0.010f;
-                float m_sceneCameraPanSpeed = 0.004f;
-                float m_sceneCameraZoomSpeed = 0.12f;
+            std::array<char, 128> m_selectedEntityNameBuffer{};
+            int m_selectedEntityNameBufferEntityIndex = -1;
+            std::array<char, 128> m_hierarchySearchBuffer{};
 
-                int m_runtimeTexture3DDepth = 8;
+            bool m_sceneViewImageHovered = false;
+            bool m_sceneViewOptionsPopupEnabled = true;
+            bool m_sceneCameraControllerInitialized = false;
+            bool m_sceneCameraInvertPan = false;
+            bool m_runtimeEntityCameraActive = false;
+
+            glm::vec3 m_sceneCameraPivot{0.0f, 0.0f, 0.0f};
+            glm::vec3 m_sceneCameraUp{0.0f, 1.0f, 0.0f};
+            float m_sceneCameraDistance = 2.0f;
+            float m_sceneCameraYawRadians = 0.0f;
+            float m_sceneCameraPitchRadians = 0.0f;
+            float m_sceneCameraRotateSpeed = 0.010f;
+            float m_sceneCameraPanSpeed = 0.004f;
+            float m_sceneCameraZoomSpeed = 0.12f;
+
+            std::string m_assetBrowserFolderFilter = "All";
+            int m_selectedAssetIndex = -1;
+
+            int m_runtimeTexture3DDepth = 8;
     };
 
 }
