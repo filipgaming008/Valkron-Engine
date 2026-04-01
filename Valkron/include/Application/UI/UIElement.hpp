@@ -45,6 +45,12 @@ protected:
 
 public:
     virtual ~UIElement() = default;
+    UIElement() = default;
+    UIElement(const UIElement&) = delete;
+    UIElement& operator=(const UIElement&) = delete;
+    UIElement(UIElement&&) = delete;
+    UIElement& operator=(UIElement&&) = delete;
+
     virtual void onRender() = 0;
 
     virtual bool hitTest(const glm::vec2& point) = 0;

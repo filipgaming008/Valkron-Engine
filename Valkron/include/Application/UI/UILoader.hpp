@@ -13,6 +13,12 @@ namespace Valkron {
 struct VALKRON_API UILoadResult {
     std::vector<std::unique_ptr<UIElement>> elements;
     std::unordered_map<std::string, UIElement*> elementsById;
+
+    UILoadResult() = default;
+    UILoadResult(const UILoadResult&) = delete;
+    UILoadResult& operator=(const UILoadResult&) = delete;
+    UILoadResult(UILoadResult&&) noexcept = default;
+    UILoadResult& operator=(UILoadResult&&) noexcept = default;
 };
 
 class VALKRON_API UILoader {
