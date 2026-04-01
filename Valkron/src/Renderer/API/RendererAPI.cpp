@@ -2,6 +2,6 @@
 
 namespace Valkron {
 
-    RendererAPIType RendererAPI::s_api = RendererAPIType::OpenGL;
+RendererAPIType RendererAPI::s_api = RendererAPIType::OpenGL;
 
 }

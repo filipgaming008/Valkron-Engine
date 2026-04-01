@@ -1,0 +1,162 @@
+{
+  "schema": {
+    "version": 1,
+    "notes": [
+      "All positions/sizes are in design-space units and are multiplied by runtime UI scale.",
+      "Every element supports optional: id, layer.",
+      "Panel supports optional children[] for hierarchy."
+    ],
+    "elementTypes": {
+      "panel": {
+        "required": ["type", "width", "height"],
+        "optional": ["id", "layer", "x", "y", "title", "color", "padding", "spacing", "layout", "scrolling", "clipChildren", "scrollSpeed", "children"],
+        "layoutValues": ["none", "vertical", "horizontal"]
+      },
+      "button": {
+        "required": ["type", "width", "height"],
+        "optional": ["id", "layer", "x", "y", "label", "color"]
+      },
+      "toggle": {
+        "required": ["type", "width", "height"],
+        "optional": ["id", "layer", "x", "y", "label", "offColor", "onColor", "value"]
+      },
+      "slider": {
+        "required": ["type", "width", "height"],
+        "optional": ["id", "layer", "x", "y", "label", "trackColor", "fillColor", "value"]
+      },
+      "dropdown": {
+        "required": ["type", "width", "height"],
+        "optional": ["id", "layer", "x", "y", "headerColor", "menuColor", "options", "selectedIndex"]
+      },
+      "textInput": {
+        "required": ["type", "width", "height"],
+        "optional": ["id", "layer", "x", "y", "color", "placeholder", "mode", "value"],
+        "modeValues": ["any", "integer", "decimal"]
+      }
+    }
+  },
+  "requiredIds": [
+    "playButton",
+    "settingsButton",
+    "quitButton",
+    "bloomToggle",
+    "exposureSlider",
+    "qualityDropdown",
+    "profileNameInput",
+    "gammaInput"
+  ],
+  "elements": [
+    {
+      "type": "panel",
+      "title": "UI Canvas",
+      "x": 24,
+      "y": 24,
+      "width": 1260,
+      "height": 690,
+      "color": [0.08, 0.10, 0.13, 0.86],
+      "padding": 14,
+      "spacing": 18,
+      "layer": 10,
+      "layout": "horizontal",
+      "children": [
+        {
+          "type": "panel",
+          "title": "Left Dock",
+          "x": 0,
+          "y": 0,
+          "width": 320,
+          "height": 620,
+          "color": [0.11, 0.14, 0.18, 0.95],
+          "padding": 14,
+          "spacing": 14,
+          "layer": 5,
+          "layout": "vertical",
+          "children": [
+            {
+              "type": "panel",
+              "title": "Controls",
+              "x": 0,
+              "y": 0,
+              "width": 292,
+              "height": 460,
+              "color": [0.14, 0.18, 0.24, 0.95],
+              "padding": 16,
+              "spacing": 12,
+              "layout": "vertical",
+              "layer": 3,
+              "children": [
+                { "id": "playButton", "type": "button", "label": "Play", "width": 260, "height": 56, "color": [0.15, 0.65, 0.95, 0.95], "layer": 2 },
+                { "id": "settingsButton", "type": "button", "label": "Settings", "width": 260, "height": 56, "color": [0.20, 0.80, 0.40, 0.95], "layer": 2 },
+                { "id": "quitButton", "type": "button", "label": "Quit", "width": 260, "height": 56, "color": [0.90, 0.30, 0.30, 0.95], "layer": 2 },
+                { "id": "bloomToggle", "type": "toggle", "label": "Bloom", "width": 260, "height": 48, "offColor": [0.25, 0.28, 0.35, 0.95], "onColor": [0.20, 0.72, 0.55, 0.95], "value": true, "layer": 2 },
+                { "id": "exposureSlider", "type": "slider", "label": "Exposure", "width": 260, "height": 44, "trackColor": [0.18, 0.20, 0.27, 0.95], "fillColor": [0.88, 0.63, 0.24, 0.96], "value": 0.65, "layer": 2 },
+                { "id": "qualityDropdown", "type": "dropdown", "width": 260, "height": 44, "headerColor": [0.22, 0.24, 0.32, 0.96], "menuColor": [0.17, 0.19, 0.27, 0.98], "options": ["Low", "Medium", "High", "Ultra"], "selectedIndex": 2, "layer": 2 },
+                { "id": "profileNameInput", "type": "textInput", "width": 260, "height": 44, "color": [0.17, 0.20, 0.26, 0.95], "placeholder": "Profile Name", "mode": "any", "value": "", "layer": 2 },
+                { "id": "gammaInput", "type": "textInput", "width": 260, "height": 44, "color": [0.17, 0.20, 0.26, 0.95], "placeholder": "Gamma (decimal)", "mode": "decimal", "value": "2.2", "layer": 2 }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "panel",
+          "title": "Workspace",
+          "x": 0,
+          "y": 0,
+          "width": 880,
+          "height": 620,
+          "color": [0.10, 0.12, 0.17, 0.90],
+          "padding": 18,
+          "spacing": 20,
+          "layer": 6,
+          "layout": "vertical",
+          "children": [
+            {
+              "type": "panel",
+              "title": "Toolbar",
+              "x": 0,
+              "y": 0,
+              "width": 844,
+              "height": 98,
+              "color": [0.13, 0.17, 0.24, 0.96],
+              "padding": 14,
+              "spacing": 14,
+              "layer": 4,
+              "layout": "horizontal",
+              "children": [
+                { "type": "button", "label": "New", "width": 170, "height": 48, "color": [0.27, 0.50, 0.95, 0.95], "layer": 3 },
+                { "type": "button", "label": "Save", "width": 170, "height": 48, "color": [0.26, 0.72, 0.55, 0.95], "layer": 3 },
+                { "type": "button", "label": "Export", "width": 170, "height": 48, "color": [0.94, 0.63, 0.22, 0.95], "layer": 3 }
+              ]
+            },
+            {
+              "type": "panel",
+              "title": "Preview Panel",
+              "x": 0,
+              "y": 0,
+              "width": 844,
+              "height": 438,
+              "color": [0.12, 0.15, 0.22, 0.94],
+              "padding": 22,
+              "spacing": 10,
+              "layer": 2,
+              "layout": "vertical",
+              "scrolling": true,
+              "clipChildren": true,
+              "scrollSpeed": 34,
+              "children": [
+                { "type": "button", "label": "Widget 1", "width": 220, "height": 52, "color": [0.46, 0.38, 0.88, 0.95], "layer": 3 },
+                { "type": "button", "label": "Widget 2", "width": 220, "height": 52, "color": [0.46, 0.38, 0.88, 0.95], "layer": 3 },
+                { "type": "button", "label": "Widget 3", "width": 220, "height": 52, "color": [0.46, 0.38, 0.88, 0.95], "layer": 3 },
+                { "type": "button", "label": "Widget 4", "width": 220, "height": 52, "color": [0.46, 0.38, 0.88, 0.95], "layer": 3 },
+                { "type": "button", "label": "Widget 5", "width": 220, "height": 52, "color": [0.46, 0.38, 0.88, 0.95], "layer": 3 },
+                { "type": "button", "label": "Widget 6", "width": 220, "height": 52, "color": [0.46, 0.38, 0.88, 0.95], "layer": 3 },
+                { "type": "button", "label": "Widget 7", "width": 220, "height": 52, "color": [0.46, 0.38, 0.88, 0.95], "layer": 3 },
+                { "type": "button", "label": "Widget 8", "width": 220, "height": 52, "color": [0.46, 0.38, 0.88, 0.95], "layer": 3 }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -8,21 +8,24 @@
 
 namespace Valkron {
 
+struct EngineSettings;
 
-    class VALKRON_API Window {
-        private:
-            GLFWwindow* m_window = nullptr;
-        public:
-            Window();
-            virtual ~Window();
+class VALKRON_API Window {
+private:
+    GLFWwindow* m_window = nullptr;
 
-            inline bool shouldClose() const {
-                return m_window && glfwWindowShouldClose(m_window) != 0;
-            }
+public:
+    explicit Window(const EngineSettings& settings);
+    virtual ~Window();
 
-            void Update();
-            inline GLFWwindow* getWindow() const { return m_window; }
-    };
+    inline bool shouldClose() const {
+        return m_window && glfwWindowShouldClose(m_window) != 0;
+    }
 
+    void Update();
+    inline GLFWwindow* getWindow() const {
+        return m_window;
+    }
+};
 
-}
+} // namespace Valkron

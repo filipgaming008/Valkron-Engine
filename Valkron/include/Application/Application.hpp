@@ -6,27 +6,29 @@
 #include "Input/InputManager.hpp"
 #include "Application/Layer.hpp"
 #include "Application/UI/UILayer.hpp"
+#include "Core/Settings.hpp"
 #include "Core/Log.hpp"
 
 #include <memory>
 
 namespace Valkron {
 
-    class VALKRON_API Application {
-        private:
-            bool isRunning = true;
-            std::unique_ptr<Window> window = nullptr;
-            InputManager& m_inputManager = InputManager::getInstance();
-            UILayer m_layer{0};
+class VALKRON_API Application {
+private:
+    bool isRunning = true;
+    EngineSettings m_settings{};
+    std::unique_ptr<Window> window = nullptr;
+    InputManager& m_inputManager = InputManager::getInstance();
+    UILayer m_layer{0};
 
-        public:
-            Application();
-            virtual ~Application();
+public:
+    Application();
+    virtual ~Application();
 
-            void Run();
+    void Run();
 
-        private:
-            void onEvent(Event& event);
-    };
+private:
+    void onEvent(Event& event);
+};
 
-}
+} // namespace Valkron

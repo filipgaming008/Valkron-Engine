@@ -7,21 +7,22 @@
 
 namespace Valkron {
 
+class VALKRON_API Layer {
+protected:
+    int m_layerId;
 
-    class VALKRON_API Layer {
-        protected:
-            int m_layerId;
-        public:
-            explicit Layer(int id) : m_layerId(id) {}
-            virtual ~Layer() = default;
+public:
+    explicit Layer(int id) : m_layerId(id) {}
+    virtual ~Layer() = default;
 
-            virtual void onAttach() {}
-            virtual void onDetach() {}
-            virtual void onUpdate(float) {}
-            virtual void onEvent(Event&) {}
+    virtual void onAttach() {}
+    virtual void onDetach() {}
+    virtual void onUpdate(float) {}
+    virtual void onEvent(Event&) {}
 
-            int getLayerId() const { return m_layerId; }
-    };
+    int getLayerId() const {
+        return m_layerId;
+    }
+};
 
-
-}
+} // namespace Valkron

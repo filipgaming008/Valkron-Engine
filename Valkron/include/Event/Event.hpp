@@ -2,71 +2,66 @@
 
 namespace Valkron {
 
-    enum class EventType {
-        Key,
-        MouseButton,
-        MouseMove,
-        MouseScroll,
-        WindowClose,
-        WindowResize
-    };
+enum class EventType { Key, CharInput, MouseButton, MouseMove, MouseScroll, WindowClose, WindowResize };
 
-    struct Event {
-        EventType type;
-        bool handled = false;
+struct Event {
+    EventType type;
+    bool handled = false;
 
-        explicit Event(EventType eventType)
-            : type(eventType) {}
+    explicit Event(EventType eventType) : type(eventType) {}
 
-        virtual ~Event() = default;
-    };
+    virtual ~Event() = default;
+};
 
-    struct KeyEvent : Event {
-        int key;
-        int scancode;
-        int action;
-        int mods;
+struct KeyEvent : Event {
+    int key;
+    int scancode;
+    int action;
+    int mods;
 
-        KeyEvent(int keyCode, int scanCode, int keyAction, int modifiers)
-            : Event(EventType::Key), key(keyCode), scancode(scanCode), action(keyAction), mods(modifiers) {}
-    };
+    KeyEvent(int keyCode, int scanCode, int keyAction, int modifiers)
+        : Event(EventType::Key), key(keyCode), scancode(scanCode), action(keyAction), mods(modifiers) {}
+};
 
-    struct MouseButtonEvent : Event {
-        int button;
-        int action;
-        int mods;
+struct MouseButtonEvent : Event {
+    int button;
+    int action;
+    int mods;
 
-        MouseButtonEvent(int buttonCode, int buttonAction, int modifiers)
-            : Event(EventType::MouseButton), button(buttonCode), action(buttonAction), mods(modifiers) {}
-    };
+    MouseButtonEvent(int buttonCode, int buttonAction, int modifiers)
+        : Event(EventType::MouseButton), button(buttonCode), action(buttonAction), mods(modifiers) {}
+};
 
-    struct MouseMoveEvent : Event {
-        double x;
-        double y;
+struct CharInputEvent : Event {
+    unsigned int codepoint;
 
-        MouseMoveEvent(double mouseX, double mouseY)
-            : Event(EventType::MouseMove), x(mouseX), y(mouseY) {}
-    };
+    explicit CharInputEvent(unsigned int value) : Event(EventType::CharInput), codepoint(value) {}
+};
 
-    struct MouseScrollEvent : Event {
-        double xOffset;
-        double yOffset;
+struct MouseMoveEvent : Event {
+    double x;
+    double y;
 
-        MouseScrollEvent(double x, double y)
-            : Event(EventType::MouseScroll), xOffset(x), yOffset(y) {}
-    };
+    MouseMoveEvent(double mouseX, double mouseY) : Event(EventType::MouseMove), x(mouseX), y(mouseY) {}
+};
 
-    struct WindowCloseEvent : Event {
-        WindowCloseEvent()
-            : Event(EventType::WindowClose) {}
-    };
+struct MouseScrollEvent : Event {
+    double xOffset;
+    double yOffset;
 
-    struct WindowResizeEvent : Event {
-        int width;
-        int height;
+    MouseScrollEvent(double x, double y) : Event(EventType::MouseScroll), xOffset(x), yOffset(y) {}
+};
 
-        WindowResizeEvent(int newWidth, int newHeight)
-            : Event(EventType::WindowResize), width(newWidth), height(newHeight) {}
-    };
+struct WindowCloseEvent : Event {
+    WindowCloseEvent() : Event(EventType::WindowClose) {}
+};
 
-}
+struct WindowResizeEvent : Event {
+    int width;
+    int height;
+
+    WindowResizeEvent(int newWidth, int newHeight)
+        : Event(EventType::WindowResize), width(newWidth), height(newHeight) {}
+};
+
+} // namespace Valkron
