@@ -30,15 +30,30 @@ add_subdirectory(vendor/glad/cmake)
 glad_add_library(glad_gl_core_46 STATIC REPRODUCIBLE API gl:core=4.6)
 set_target_properties(glad_gl_core_46 PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
+if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/vendor/imgui/imgui.cpp")
+    message(FATAL_ERROR "Dear ImGui submodule not found! Please run: git submodule update --init --recursive")
+endif()
+
+set(IMGUI_SOURCES
+    ${CMAKE_CURRENT_SOURCE_DIR}/vendor/imgui/imgui.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/vendor/imgui/imgui_draw.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/vendor/imgui/imgui_tables.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/vendor/imgui/imgui_widgets.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/vendor/imgui/backends/imgui_impl_glfw.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/vendor/imgui/backends/imgui_impl_opengl3.cpp
+)
+
+add_library(imgui STATIC ${IMGUI_SOURCES})
+set_target_properties(imgui PROPERTIES POSITION_INDEPENDENT_CODE ON)
+target_include_directories(imgui
+    PUBLIC  ${CMAKE_CURRENT_SOURCE_DIR}/vendor/imgui
+    PUBLIC  ${CMAKE_CURRENT_SOURCE_DIR}/vendor/imgui/backends
+    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/vendor/glfw/include
+)
+
 if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/vendor/stb/stb_image.h")
     message(FATAL_ERROR "stb submodule not found! Please run: git submodule update --init --recursive")
 endif()
-
-if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/vendor/freetype/CMakeLists.txt")
-    message(FATAL_ERROR "FreeType submodule not found! Please run: git submodule update --init --recursive")
-endif()
-add_subdirectory(vendor/freetype)
-set_target_properties(freetype PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 # Add source & header files
 file(GLOB_RECURSE PROJECT_HEADERS CONFIGURE_DEPENDS
@@ -57,13 +72,14 @@ target_include_directories(${PROJECT_NAME}
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src
     PUBLIC  ${CMAKE_CURRENT_SOURCE_DIR}/vendor/glfw/include
     PUBLIC  ${CMAKE_CURRENT_SOURCE_DIR}/vendor/glm
-    PUBLIC  ${CMAKE_CURRENT_SOURCE_DIR}/vendor/freetype/include
+    PUBLIC  ${CMAKE_CURRENT_SOURCE_DIR}/vendor/imgui
+    PUBLIC  ${CMAKE_CURRENT_SOURCE_DIR}/vendor/imgui/backends
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/vendor/stb
 )
 
 # Link GLFW and OpenGL
 find_package(OpenGL REQUIRED)
-target_link_libraries(${PROJECT_NAME} PRIVATE glfw OpenGL::GL glad_gl_core_46 freetype)
+target_link_libraries(${PROJECT_NAME} PRIVATE glfw OpenGL::GL glad_gl_core_46 imgui)
 
 # Platform detection
 if(UNIX AND NOT APPLE)

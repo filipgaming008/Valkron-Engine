@@ -10,6 +10,6 @@
 [submodule "Valkron/vendor/stb"]
 	path = Valkron/vendor/stb
 	url = https://github.com/nothings/stb.git
-[submodule "Valkron/vendor/freetype"]
-	path = Valkron/vendor/freetype
-	url = https://github.com/freetype/freetype
+[submodule "Valkron/vendor/imgui"]
+	path = Valkron/vendor/imgui
+	url = https://github.com/ocornut/imgui

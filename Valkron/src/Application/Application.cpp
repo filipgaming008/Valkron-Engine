@@ -28,7 +28,7 @@ namespace Valkron {
             onEvent(event);
         });
 
-        Renderer::init();
+        Renderer::init(window->getWindow());
         int width = 0;
         int height = 0;
         glfwGetFramebufferSize(window->getWindow(), &width, &height);

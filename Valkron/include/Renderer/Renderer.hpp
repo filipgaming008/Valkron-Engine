@@ -1,21 +1,21 @@
 #pragma once
 
-#include "Application/UI/UIElement.hpp"
 #include "Core/Core.hpp"
 #include "Renderer/Camera.hpp"
 
-#include <cstdint>
-#include <vector>
+#define GLFW_INCLUDE_NONE
+#include "GLFW/glfw3.h"
 
 namespace Valkron {
 
+    using GLFWwindow = ::GLFWwindow;
+
     class VALKRON_API Renderer {
         public:
-            static void init();
+            static void init(GLFWwindow* window);
             static void shutdown();
             static void beginFrame();
             static void endFrame();
-            static void submitUIBatch(const std::vector<UIVertex>& vertices, const std::vector<std::uint32_t>& indices);
             static void setCameraType(CameraType type);
             static void onWindowResize(int width, int height);
     };
