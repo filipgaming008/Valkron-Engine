@@ -55,7 +55,7 @@ namespace Valkron {
         LOG_DEBUG("Running Application...");
 
         while (isRunning) {
-            float current_time = glfwGetTime();
+            float current_time = static_cast<float>(glfwGetTime());
             float delta_time = current_time - lastTime;
             lastTime = current_time;
 
