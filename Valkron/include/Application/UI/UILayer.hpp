@@ -15,6 +15,11 @@ namespace Valkron {
             UILayer(int id) : Layer(id) {}
             ~UILayer() override = default;
 
+            UILayer(const UILayer&) = delete;
+            UILayer& operator=(const UILayer&) = delete;
+            UILayer(UILayer&&) = delete;
+            UILayer& operator=(UILayer&&) = delete;
+
             void onAttach() override;
             void onDetach() override;
             void onUpdate(float deltaTime) override;

@@ -14,6 +14,14 @@ namespace Valkron {
 
     class UIManager {
         public:
+            UIManager() = default;
+            ~UIManager() = default;
+
+            UIManager(const UIManager&) = delete;
+            UIManager& operator=(const UIManager&) = delete;
+            UIManager(UIManager&&) noexcept = default;
+            UIManager& operator=(UIManager&&) noexcept = default;
+
             void addElement(std::unique_ptr<UIElement> element);
             void removeAll();
 

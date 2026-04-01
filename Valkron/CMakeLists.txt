@@ -11,6 +11,21 @@ add_subdirectory(vendor/glm)
 if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/vendor/glad/cmake/CMakeLists.txt")
     message(FATAL_ERROR "GLAD submodule not found! Please run: git submodule update --init --recursive")
 endif()
+
+find_package(Python3 COMPONENTS Interpreter REQUIRED)
+execute_process(
+    COMMAND "${Python3_EXECUTABLE}" -c "import jinja2"
+    RESULT_VARIABLE GLAD_JINJA2_RESULT
+    OUTPUT_QUIET
+    ERROR_QUIET
+)
+if(NOT GLAD_JINJA2_RESULT EQUAL 0)
+    message(FATAL_ERROR
+        "GLAD requires Python package 'jinja2' to generate sources. "
+        "Install dependencies with: python -m pip install -r Valkron/vendor/glad/requirements.txt"
+    )
+endif()
+
 add_subdirectory(vendor/glad/cmake)
 glad_add_library(glad_gl_core_46 STATIC REPRODUCIBLE API gl:core=4.6)
 set_target_properties(glad_gl_core_46 PROPERTIES POSITION_INDEPENDENT_CODE ON)
