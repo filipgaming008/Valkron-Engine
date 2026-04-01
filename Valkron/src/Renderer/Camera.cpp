@@ -49,6 +49,18 @@ namespace Valkron {
         m_up = up;
     }
 
+    const glm::vec3& Camera::getPosition() const {
+        return m_position;
+    }
+
+    const glm::vec3& Camera::getTarget() const {
+        return m_target;
+    }
+
+    const glm::vec3& Camera::getUp() const {
+        return m_up;
+    }
+
     void Camera::setPerspective(float fovDegrees, float nearPlane, float farPlane) {
         m_type = CameraType::Perspective;
         m_fovDegrees = fovDegrees;

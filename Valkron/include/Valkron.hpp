@@ -1,10 +1,15 @@
 #pragma once
 
 #include "Engine/Engine.hpp"
+#include "Engine/AssetLoader.hpp"
+#include "Engine/EngineConfig.hpp"
+#include "Engine/Scene.hpp"
 #include "Application/Application.hpp"
 #include "Event/Event.hpp"
 #include "Renderer/Buffers.hpp"
 #include "Renderer/Camera.hpp"
+#include "Renderer/ComputeShader.hpp"
+#include "Renderer/Model.hpp"
 #include "Renderer/Renderer.hpp"
 #include "Renderer/Shader.hpp"
 #include "Renderer/Texture.hpp"

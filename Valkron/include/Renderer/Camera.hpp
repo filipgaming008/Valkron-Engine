@@ -24,6 +24,9 @@ namespace Valkron {
             void setPosition(const glm::vec3& position);
             void setTarget(const glm::vec3& target);
             void setUp(const glm::vec3& up);
+            const glm::vec3& getPosition() const;
+            const glm::vec3& getTarget() const;
+            const glm::vec3& getUp() const;
             void setPerspective(float fovDegrees, float nearPlane, float farPlane);
             void setOrthographic(float left, float right, float bottom, float top, float nearPlane, float farPlane);
         private:

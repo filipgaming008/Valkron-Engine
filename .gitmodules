@@ -13,3 +13,9 @@
 [submodule "Valkron/vendor/imgui"]
 	path = Valkron/vendor/imgui
 	url = https://github.com/ocornut/imgui
+[submodule "Valkron/vendor/assimp"]
+	path = Valkron/vendor/assimp
+	url = https://github.com/assimp/assimp
+[submodule "Valkron/vendor/imguizmo"]
+	path = Valkron/vendor/imguizmo
+	url = https://github.com/cedricguillemet/imguizmo

@@ -55,6 +55,15 @@ if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/vendor/stb/stb_image.h")
     message(FATAL_ERROR "stb submodule not found! Please run: git submodule update --init --recursive")
 endif()
 
+if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/vendor/assimp/CMakeLists.txt")
+    message(FATAL_ERROR "Assimp submodule not found! Please run: git submodule update --init --recursive")
+endif()
+
+set(ASSIMP_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(ASSIMP_BUILD_ASSIMP_TOOLS OFF CACHE BOOL "" FORCE)
+set(ASSIMP_INSTALL OFF CACHE BOOL "" FORCE)
+add_subdirectory(vendor/assimp)
+
 # Add source & header files
 file(GLOB_RECURSE PROJECT_HEADERS CONFIGURE_DEPENDS
     ${CMAKE_CURRENT_SOURCE_DIR}/include/*.hpp
@@ -79,7 +88,7 @@ target_include_directories(${PROJECT_NAME}
 
 # Link GLFW and OpenGL
 find_package(OpenGL REQUIRED)
-target_link_libraries(${PROJECT_NAME} PRIVATE glfw OpenGL::GL glad_gl_core_46 imgui)
+target_link_libraries(${PROJECT_NAME} PRIVATE glfw OpenGL::GL glad_gl_core_46 imgui assimp::assimp)
 
 # Platform detection
 if(UNIX AND NOT APPLE)
@@ -87,6 +96,7 @@ if(UNIX AND NOT APPLE)
     target_compile_options(${PROJECT_NAME} PRIVATE -fvisibility=hidden)
 elseif(WIN32)
     target_compile_definitions(${PROJECT_NAME} PUBLIC VALKRON_PLATFORM_WINDOWS)
+    target_link_libraries(${PROJECT_NAME} PRIVATE Comdlg32)
 endif()
 target_compile_definitions(${PROJECT_NAME} PRIVATE VALKRON_BUILD_DLL)
 

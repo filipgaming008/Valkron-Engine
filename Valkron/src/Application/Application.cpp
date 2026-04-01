@@ -19,7 +19,9 @@ namespace Valkron {
     }
 
     Application::Application() {
-        window = std::make_unique<Window>();
+        m_engineConfig.load();
+
+        window = std::make_unique<Window>(m_engineConfig.getSettings());
         VALKRON_CORE_ASSERT(window != nullptr, "Failed to allocate Window object");
         VALKRON_CORE_ASSERT(window->getWindow() != nullptr, "Window initialization failed");
 
@@ -31,10 +33,11 @@ namespace Valkron {
         Renderer::init(window->getWindow());
         int width = 0;
         int height = 0;
-        glfwGetFramebufferSize(window->getWindow(), &width, &height);
+        window->getFramebufferSize(width, height);
         Renderer::onWindowResize(width, height);
 
         m_inputManager.pushLayer(&m_layer);
+        m_layer.bindEngineSettings(window.get(), &m_engineConfig);
         m_layer.onAttach();
         LOG_DEBUG("Application Created!");
     }
