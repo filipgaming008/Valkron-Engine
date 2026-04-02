@@ -18,6 +18,9 @@ namespace Valkron {
         glm::vec3 specularColor{1.0f, 1.0f, 1.0f};
         float shininess = 32.0f;
         std::shared_ptr<Texture> diffuseTexture = nullptr;
+        std::shared_ptr<Texture> specularTexture = nullptr;
+        std::shared_ptr<Texture> normalTexture = nullptr;
+        std::vector<std::string> sourceTexturePaths;
     };
 
     class VALKRON_API Model {
@@ -48,10 +51,12 @@ namespace Valkron {
 
             bool isLoaded() const { return !m_meshes.empty(); }
             const std::string& getPath() const { return m_modelPath; }
+            const std::vector<std::string>& getReferencedTexturePaths() const { return m_referencedTexturePaths; }
 
         private:
             std::string m_modelPath;
             std::vector<Mesh> m_meshes;
+            std::vector<std::string> m_referencedTexturePaths;
     };
 
 }

@@ -10,8 +10,13 @@
 
 #include "glad/gl.h"
 
+#include <algorithm>
+#include <cctype>
 #include <filesystem>
+#include <fstream>
+#include <sstream>
 #include <string>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -22,6 +27,139 @@ namespace Valkron {
         glm::vec3 normal{0.0f, 1.0f, 0.0f};
         glm::vec2 texCoord{0.0f, 0.0f};
     };
+
+    std::string toLowercaseCopy(const std::string& value) {
+        std::string lowered = value;
+        std::transform(lowered.begin(), lowered.end(), lowered.begin(), [](unsigned char ch) {
+            return static_cast<char>(std::tolower(ch));
+        });
+        return lowered;
+    }
+
+    std::string trimCopy(const std::string& value) {
+        const std::size_t begin = value.find_first_not_of(" \t\r\n");
+        if (begin == std::string::npos) {
+            return {};
+        }
+
+        const std::size_t end = value.find_last_not_of(" \t\r\n");
+        return value.substr(begin, end - begin + 1);
+    }
+
+    std::string normalizePathKey(const std::filesystem::path& path) {
+        return toLowercaseCopy(path.lexically_normal().generic_string());
+    }
+
+    std::filesystem::path resolveMaterialTexturePath(const aiString& texturePath, const std::filesystem::path& modelDirectory) {
+        const std::filesystem::path rawTexturePath(texturePath.C_Str());
+        if (rawTexturePath.empty()) {
+            return {};
+        }
+
+        std::error_code errorCode;
+        if (rawTexturePath.is_absolute() && std::filesystem::exists(rawTexturePath, errorCode)) {
+            return rawTexturePath;
+        }
+
+        std::filesystem::path candidate = modelDirectory / rawTexturePath;
+        if (std::filesystem::exists(candidate, errorCode)) {
+            return candidate;
+        }
+
+        if (!rawTexturePath.filename().empty()) {
+            candidate = modelDirectory / rawTexturePath.filename();
+            if (std::filesystem::exists(candidate, errorCode)) {
+                return candidate;
+            }
+        }
+
+        const std::filesystem::path fallbackPath = FileSystem::resolveExistingPath(rawTexturePath);
+        if (std::filesystem::exists(fallbackPath, errorCode)) {
+            return fallbackPath;
+        }
+
+        return {};
+    }
+
+    std::shared_ptr<Texture> loadMaterialTexture(
+        aiMaterial* material,
+        aiTextureType textureType,
+        const std::filesystem::path& modelDirectory,
+        std::string& outResolvedPath
+    ) {
+        outResolvedPath.clear();
+        if (material == nullptr || material->GetTextureCount(textureType) == 0) {
+            return nullptr;
+        }
+
+        aiString texturePath;
+        if (material->GetTexture(textureType, 0, &texturePath) != AI_SUCCESS) {
+            return nullptr;
+        }
+
+        const std::filesystem::path resolvedPath = resolveMaterialTexturePath(texturePath, modelDirectory);
+        if (resolvedPath.empty()) {
+            LOG_WARN("Unable to resolve material texture path: " + std::string(texturePath.C_Str()));
+            return nullptr;
+        }
+
+        auto texture = std::make_shared<Texture>();
+        if (!texture->loadTexture(resolvedPath.string())) {
+            LOG_WARN("Failed to load material texture: " + resolvedPath.string());
+            return nullptr;
+        }
+
+        outResolvedPath = resolvedPath.string();
+        return texture;
+    }
+
+    void verifyObjMaterialLibraries(const std::filesystem::path& modelPath) {
+        if (toLowercaseCopy(modelPath.extension().string()) != ".obj") {
+            return;
+        }
+
+        std::ifstream objFile(modelPath);
+        if (!objFile.is_open()) {
+            return;
+        }
+
+        std::unordered_set<std::string> seenLibraries;
+        int resolvedCount = 0;
+        int missingCount = 0;
+
+        std::string line;
+        while (std::getline(objFile, line)) {
+            const std::string trimmedLine = trimCopy(line);
+            if (trimmedLine.size() < 7 || trimmedLine.rfind("mtllib", 0) != 0) {
+                continue;
+            }
+
+            std::istringstream lineStream(trimmedLine.substr(6));
+            std::string mtlName;
+            while (lineStream >> mtlName) {
+                const std::filesystem::path mtlPath = modelPath.parent_path() / mtlName;
+                const std::string key = normalizePathKey(mtlPath);
+                if (!seenLibraries.insert(key).second) {
+                    continue;
+                }
+
+                std::error_code errorCode;
+                if (std::filesystem::exists(mtlPath, errorCode)) {
+                    ++resolvedCount;
+                } else {
+                    ++missingCount;
+                    LOG_WARN("OBJ references missing MTL file: " + mtlPath.string());
+                }
+            }
+        }
+
+        if (resolvedCount > 0) {
+            LOG_INFO("Resolved " + std::to_string(resolvedCount) + " MTL file(s) for OBJ: " + modelPath.string());
+        }
+        if (resolvedCount == 0 && missingCount == 0) {
+            LOG_WARN("OBJ file has no mtllib declaration: " + modelPath.string());
+        }
+    }
 
     ModelMaterial buildMaterial(const aiMesh* mesh, const aiScene* scene, const std::filesystem::path& modelDirectory) {
         ModelMaterial material;
@@ -50,13 +188,25 @@ namespace Valkron {
             material.shininess = shininess;
         }
 
-        aiString texturePath;
-        if (aiMat->GetTextureCount(aiTextureType_DIFFUSE) > 0 && aiMat->GetTexture(aiTextureType_DIFFUSE, 0, &texturePath) == AI_SUCCESS) {
-            std::filesystem::path diffuseTexturePath = modelDirectory / texturePath.C_Str();
-            auto diffuseTexture = std::make_shared<Texture>();
-            if (diffuseTexture->loadTexture(diffuseTexturePath.string())) {
-                material.diffuseTexture = std::move(diffuseTexture);
-            }
+        std::string diffuseTexturePath;
+        material.diffuseTexture = loadMaterialTexture(aiMat, aiTextureType_DIFFUSE, modelDirectory, diffuseTexturePath);
+        if (!diffuseTexturePath.empty()) {
+            material.sourceTexturePaths.push_back(diffuseTexturePath);
+        }
+
+        std::string specularTexturePath;
+        material.specularTexture = loadMaterialTexture(aiMat, aiTextureType_SPECULAR, modelDirectory, specularTexturePath);
+        if (!specularTexturePath.empty()) {
+            material.sourceTexturePaths.push_back(specularTexturePath);
+        }
+
+        std::string normalTexturePath;
+        material.normalTexture = loadMaterialTexture(aiMat, aiTextureType_NORMALS, modelDirectory, normalTexturePath);
+        if (material.normalTexture == nullptr) {
+            material.normalTexture = loadMaterialTexture(aiMat, aiTextureType_HEIGHT, modelDirectory, normalTexturePath);
+        }
+        if (!normalTexturePath.empty()) {
+            material.sourceTexturePaths.push_back(normalTexturePath);
         }
 
         return material;
@@ -136,6 +286,8 @@ namespace Valkron {
         const std::filesystem::path resolvedModelPath = FileSystem::resolveExistingPath(modelPath);
         m_modelPath = resolvedModelPath.string();
 
+        verifyObjMaterialLibraries(resolvedModelPath);
+
         Assimp::Importer importer;
         const aiScene* scene = importer.ReadFile(
             m_modelPath,
@@ -157,12 +309,29 @@ namespace Valkron {
         processNode(scene->mRootNode, scene, modelDirectory, loadedMeshes);
 
         m_meshes = std::move(loadedMeshes);
+        m_referencedTexturePaths.clear();
         if (m_meshes.empty()) {
             LOG_ERROR("Model contains no renderable meshes: " + m_modelPath);
             return false;
         }
 
-        LOG_INFO("Loaded model with " + std::to_string(m_meshes.size()) + " mesh(es): " + m_modelPath);
+        std::unordered_set<std::string> seenTexturePaths;
+        for (const Mesh& mesh : m_meshes) {
+            for (const std::string& texturePath : mesh.material.sourceTexturePaths) {
+                const std::filesystem::path normalizedPath = std::filesystem::path(texturePath).lexically_normal();
+                const std::string key = normalizePathKey(normalizedPath);
+                if (!seenTexturePaths.insert(key).second) {
+                    continue;
+                }
+
+                m_referencedTexturePaths.push_back(normalizedPath.string());
+            }
+        }
+
+        LOG_INFO(
+            "Loaded model with " + std::to_string(m_meshes.size()) + " mesh(es) and " +
+            std::to_string(m_referencedTexturePaths.size()) + " referenced material texture(s): " + m_modelPath
+        );
         return true;
     }
 
@@ -173,7 +342,9 @@ namespace Valkron {
             }
 
             const bool hasDiffuseMap = mesh.material.diffuseTexture != nullptr;
+            const bool hasSpecularMap = mesh.material.specularTexture != nullptr;
             shader.setInt("u_Material.hasDiffuseMap", hasDiffuseMap ? 1 : 0);
+            shader.setInt("u_Material.hasSpecularMap", hasSpecularMap ? 1 : 0);
             shader.setVec3("u_Material.diffuseColor", &mesh.material.diffuseColor.x);
             shader.setVec3("u_Material.specularColor", &mesh.material.specularColor.x);
             shader.setFloat("u_Material.shininess", mesh.material.shininess);
@@ -183,12 +354,21 @@ namespace Valkron {
                 shader.setInt("u_Material.diffuseMap", 0);
             }
 
+            if (hasSpecularMap) {
+                mesh.material.specularTexture->bind(1);
+                shader.setInt("u_Material.specularMap", 1);
+            }
+
             mesh.vertexArray->bind();
             mesh.indexBuffer->bind();
             glDrawElements(GL_TRIANGLES, static_cast<GLsizei>(mesh.indexBuffer->getCount()), GL_UNSIGNED_INT, nullptr);
 
             if (hasDiffuseMap) {
                 mesh.material.diffuseTexture->unbind();
+            }
+
+            if (hasSpecularMap) {
+                mesh.material.specularTexture->unbind();
             }
         }
     }

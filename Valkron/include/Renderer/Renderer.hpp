@@ -9,11 +9,18 @@
 #define GLFW_INCLUDE_NONE
 #include "GLFW/glfw3.h"
 
+#include <string>
 #include <vector>
 
 namespace Valkron {
 
     using GLFWwindow = ::GLFWwindow;
+
+    struct VALKRON_API SceneModelInstance {
+        std::string modelName;
+        glm::mat4 transform{1.0f};
+        bool selected = false;
+    };
 
     class VALKRON_API Renderer {
         public:
@@ -24,6 +31,7 @@ namespace Valkron {
             static void setCameraType(CameraType type);
             static void setCameraLookAt(const glm::vec3& position, const glm::vec3& target, const glm::vec3& up = glm::vec3(0.0f, 1.0f, 0.0f));
             static void setModelTransform(const glm::vec3& position, const glm::vec3& rotationDegrees, const glm::vec3& scale);
+            static void setSceneModelInstances(const std::vector<SceneModelInstance>& modelInstances);
             static void setSceneEntityTransforms(const std::vector<glm::mat4>& entityTransforms, int selectedEntityIndex);
             static void setLightEntityPositions(const std::vector<glm::vec3>& lightPositions);
             static glm::vec3 getCameraPosition();

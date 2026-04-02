@@ -34,6 +34,10 @@ if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/vendor/imgui/imgui.cpp")
     message(FATAL_ERROR "Dear ImGui submodule not found! Please run: git submodule update --init --recursive")
 endif()
 
+if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/vendor/imguizmo/ImGuizmo.cpp")
+    message(FATAL_ERROR "ImGuizmo submodule not found! Please run: git submodule update --init --recursive")
+endif()
+
 set(IMGUI_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/vendor/imgui/imgui.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/vendor/imgui/imgui_draw.cpp
@@ -42,6 +46,7 @@ set(IMGUI_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/vendor/imgui/misc/cpp/imgui_stdlib.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/vendor/imgui/backends/imgui_impl_glfw.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/vendor/imgui/backends/imgui_impl_opengl3.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/vendor/imguizmo/ImGuizmo.cpp
 )
 
 add_library(imgui STATIC ${IMGUI_SOURCES})
@@ -50,6 +55,7 @@ target_include_directories(imgui
     PUBLIC  ${CMAKE_CURRENT_SOURCE_DIR}/vendor/imgui
     PUBLIC  ${CMAKE_CURRENT_SOURCE_DIR}/vendor/imgui/misc/cpp
     PUBLIC  ${CMAKE_CURRENT_SOURCE_DIR}/vendor/imgui/backends
+    PUBLIC  ${CMAKE_CURRENT_SOURCE_DIR}/vendor/imguizmo
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/vendor/glfw/include
 )
 
@@ -85,6 +91,7 @@ target_include_directories(${PROJECT_NAME}
     PUBLIC  ${CMAKE_CURRENT_SOURCE_DIR}/vendor/glm
     PUBLIC  ${CMAKE_CURRENT_SOURCE_DIR}/vendor/imgui
     PUBLIC  ${CMAKE_CURRENT_SOURCE_DIR}/vendor/imgui/backends
+    PUBLIC  ${CMAKE_CURRENT_SOURCE_DIR}/vendor/imguizmo
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/vendor/stb
 )
 

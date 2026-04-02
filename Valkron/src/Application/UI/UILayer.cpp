@@ -11,15 +11,21 @@
 #include "Core/Log.hpp"
 #include "Engine/AssetLoader.hpp"
 #include "Event/Event.hpp"
+#include "Renderer/Model.hpp"
 #include "Renderer/Renderer.hpp"
+#include "Renderer/Texture.hpp"
 #include "Window/Window.hpp"
 
 #include "imgui.h"
 #include "imgui_internal.h"
+#include "ImGuizmo.h"
 
 #include "glm/glm.hpp"
 #include "glm/geometric.hpp"
+#include "glm/gtc/constants.hpp"
 #include "glm/gtc/matrix_transform.hpp"
+#include "glm/gtc/quaternion.hpp"
+#include "glm/gtc/type_ptr.hpp"
 #include "glm/trigonometric.hpp"
 
 #include <algorithm>
@@ -32,6 +38,7 @@
 #include <filesystem>
 #include <functional>
 #include <limits>
+#include <memory>
 #include <optional>
 #include <set>
 #include <utility>
@@ -136,6 +143,48 @@ namespace Valkron {
         return names;
     }
 
+    std::string normalizePathKey(const std::string& pathValue) {
+        std::string normalized = std::filesystem::path(pathValue).lexically_normal().generic_string();
+        std::transform(normalized.begin(), normalized.end(), normalized.begin(), [](unsigned char ch) {
+            return static_cast<char>(std::tolower(ch));
+        });
+        return normalized;
+    }
+
+    int registerImportedModelMaterialTextures(Scene& scene, const std::string& modelName) {
+        const std::shared_ptr<Model> model = AssetLoader::getModel(modelName);
+        if (model == nullptr || !model->isLoaded()) {
+            return 0;
+        }
+
+        std::vector<std::string> existingNames = collectAllRuntimeAssetNames();
+        std::unordered_set<std::string> existingPathKeys;
+        for (const SceneAsset& existingAsset : scene.getAssets()) {
+            existingPathKeys.insert(normalizePathKey(existingAsset.path));
+            existingNames.push_back(existingAsset.name);
+        }
+
+        int importedTextureCount = 0;
+        for (const std::string& texturePath : model->getReferencedTexturePaths()) {
+            const std::string pathKey = normalizePathKey(texturePath);
+            if (existingPathKeys.find(pathKey) != existingPathKeys.end()) {
+                continue;
+            }
+
+            const std::string textureName = makeUniqueAssetName(deriveAssetBaseName(texturePath, modelName + "_Texture"), existingNames);
+            if (!AssetLoader::loadTexture2D(textureName, texturePath)) {
+                continue;
+            }
+
+            scene.addAsset(textureName, texturePath);
+            existingNames.push_back(textureName);
+            existingPathKeys.insert(pathKey);
+            ++importedTextureCount;
+        }
+
+        return importedTextureCount;
+    }
+
     std::string toLowercase(std::string value) {
         std::transform(value.begin(), value.end(), value.begin(), [](unsigned char ch) {
             return static_cast<char>(std::tolower(ch));
@@ -153,8 +202,101 @@ namespace Valkron {
         return "Root";
     }
 
+    std::string normalizeFolderPath(const std::string& pathValue) {
+        if (pathValue.empty()) {
+            return {};
+        }
+
+        std::string normalized = std::filesystem::path(pathValue).lexically_normal().generic_string();
+        if (normalized == ".") {
+            return {};
+        }
+
+        if (normalized.starts_with("./")) {
+            normalized = normalized.substr(2);
+        }
+
+        while (!normalized.empty() && normalized.back() == '/') {
+            normalized.pop_back();
+        }
+
+        return normalized;
+    }
+
+    std::string getAssetFolderPath(const SceneAsset& asset) {
+        const std::filesystem::path assetPath(asset.path);
+        return normalizeFolderPath(assetPath.parent_path().generic_string());
+    }
+
+    std::string getFolderLeafName(const std::string& folderPath) {
+        const std::string normalized = normalizeFolderPath(folderPath);
+        if (normalized.empty()) {
+            return "Root";
+        }
+
+        const std::filesystem::path pathValue(normalized);
+        const std::string filename = pathValue.filename().string();
+        if (!filename.empty()) {
+            return filename;
+        }
+
+        return normalized;
+    }
+
+    std::string getParentFolderPath(const std::string& folderPath) {
+        const std::string normalized = normalizeFolderPath(folderPath);
+        if (normalized.empty()) {
+            return {};
+        }
+
+        return normalizeFolderPath(std::filesystem::path(normalized).parent_path().generic_string());
+    }
+
+    std::optional<std::string> getDirectChildFolder(const std::string& currentFolder, const std::string& candidateFolder) {
+        const std::string current = normalizeFolderPath(currentFolder);
+        const std::string candidate = normalizeFolderPath(candidateFolder);
+        if (candidate.empty()) {
+            return std::nullopt;
+        }
+
+        if (current.empty()) {
+            const std::size_t slashPos = candidate.find('/');
+            if (slashPos == std::string::npos) {
+                return candidate;
+            }
+
+            return candidate.substr(0, slashPos);
+        }
+
+        if (candidate == current) {
+            return std::nullopt;
+        }
+
+        const std::string prefix = current + "/";
+        if (!candidate.starts_with(prefix)) {
+            return std::nullopt;
+        }
+
+        const std::string remainder = candidate.substr(prefix.size());
+        if (remainder.empty()) {
+            return std::nullopt;
+        }
+
+        const std::size_t slashPos = remainder.find('/');
+        if (slashPos == std::string::npos) {
+            return prefix + remainder;
+        }
+
+        return prefix + remainder.substr(0, slashPos);
+    }
+
     std::string getAssetExtensionLowercase(const SceneAsset& asset) {
         return toLowercase(std::filesystem::path(asset.path).extension().string());
+    }
+
+    bool isModelSceneAsset(const SceneAsset& asset) {
+        const std::string extension = getAssetExtensionLowercase(asset);
+        return extension == ".obj" || extension == ".fbx" || extension == ".gltf" || extension == ".glb" || extension == ".dae" || extension == ".3ds";
     }
 
     const char* getAssetIconToken(const SceneAsset& asset) {
@@ -193,51 +335,68 @@ namespace Valkron {
         return ImVec4(0.24f, 0.24f, 0.30f, 1.0f);
     }
 
-    bool isCameraEntityName(const std::string& entityName) {
-        return toLowercase(entityName).find("camera") != std::string::npos;
+    bool isCameraEntity(const SceneEntity& entity) {
+        return entity.type == SceneEntityType::Camera;
     }
 
-    bool isLightEntityName(const std::string& entityName) {
-        return toLowercase(entityName).find("light") != std::string::npos;
+    bool isLightEntity(const SceneEntity& entity) {
+        return entity.type == SceneEntityType::Light;
+    }
+
+    const char* getSceneEntityTypeDisplayName(SceneEntityType type) {
+        switch (type) {
+            case SceneEntityType::Camera:
+                return "Camera";
+            case SceneEntityType::Light:
+                return "Light";
+            case SceneEntityType::Generic:
+            default:
+                return "Generic";
+        }
     }
 
     const char* getEntityCategoryToken(const SceneEntity& entity) {
-        const std::string lowerName = toLowercase(entity.name);
-        if (lowerName.find("camera") != std::string::npos) {
-            return "CAM";
-        }
-        if (lowerName.find("light") != std::string::npos) {
-            return "LGT";
-        }
-        if (lowerName.find("player") != std::string::npos) {
-            return "PLY";
+        switch (entity.type) {
+            case SceneEntityType::Camera:
+                return "CAM";
+            case SceneEntityType::Light:
+                return "LGT";
+            case SceneEntityType::Generic:
+                return entity.modelAssetName.empty() ? "ENT" : "MOD";
+            default:
+                break;
         }
 
         return "ENT";
     }
 
     const char* getEntityIconToken(const SceneEntity& entity) {
-        const std::string lowerName = toLowercase(entity.name);
-        if (lowerName.find("camera") != std::string::npos) {
-            return "[@]";
-        }
-        if (lowerName.find("light") != std::string::npos) {
-            return "[*]";
+        switch (entity.type) {
+            case SceneEntityType::Camera:
+                return "[@]";
+            case SceneEntityType::Light:
+                return "[*]";
+            case SceneEntityType::Generic:
+                return entity.modelAssetName.empty() ? "[ ]" : "[M]";
+            default:
+                break;
         }
 
         return "[ ]";
     }
 
     ImVec4 getEntityBadgeColor(const SceneEntity& entity) {
-        const std::string lowerName = toLowercase(entity.name);
-        if (lowerName.find("camera") != std::string::npos) {
-            return ImVec4(0.16f, 0.30f, 0.54f, 1.0f);
-        }
-        if (lowerName.find("light") != std::string::npos) {
-            return ImVec4(0.42f, 0.32f, 0.10f, 1.0f);
-        }
-        if (lowerName.find("player") != std::string::npos) {
-            return ImVec4(0.20f, 0.42f, 0.20f, 1.0f);
+        switch (entity.type) {
+            case SceneEntityType::Camera:
+                return ImVec4(0.16f, 0.30f, 0.54f, 1.0f);
+            case SceneEntityType::Light:
+                return ImVec4(0.42f, 0.32f, 0.10f, 1.0f);
+            case SceneEntityType::Generic:
+                if (!entity.modelAssetName.empty()) {
+                    return ImVec4(0.16f, 0.38f, 0.26f, 1.0f);
+                }
+            default:
+                break;
         }
 
         return ImVec4(0.30f, 0.30f, 0.34f, 1.0f);
@@ -253,16 +412,18 @@ namespace Valkron {
     }
 
     glm::mat4 composeLocalTransformMatrix(const SceneTransform& transform) {
+        const glm::vec3 combinedScale(
+            std::max(0.01f, transform.scale.x * transform.size.x),
+            std::max(0.01f, transform.scale.y * transform.size.y),
+            std::max(0.01f, transform.scale.z * transform.size.z)
+        );
+
         glm::mat4 matrix(1.0f);
         matrix = glm::translate(matrix, transform.position);
         matrix = glm::rotate(matrix, glm::radians(transform.rotation.x), glm::vec3(1.0f, 0.0f, 0.0f));
         matrix = glm::rotate(matrix, glm::radians(transform.rotation.y), glm::vec3(0.0f, 1.0f, 0.0f));
         matrix = glm::rotate(matrix, glm::radians(transform.rotation.z), glm::vec3(0.0f, 0.0f, 1.0f));
-        matrix = glm::scale(matrix, glm::vec3(
-            std::max(0.01f, transform.scale.x),
-            std::max(0.01f, transform.scale.y),
-            std::max(0.01f, transform.scale.z)
-        ));
+        matrix = glm::scale(matrix, combinedScale);
         return matrix;
     }
 
@@ -295,6 +456,449 @@ namespace Valkron {
         }
 
         return glm::normalize(forward);
+    }
+
+    std::optional<ImVec2> projectWorldPositionToImage(
+        const glm::vec3& worldPosition,
+        const glm::mat4& viewMatrix,
+        const glm::mat4& projectionMatrix,
+        const ImVec2& imageRectMin,
+        const ImVec2& imageRectMax
+    ) {
+        const glm::vec4 clipPosition = projectionMatrix * viewMatrix * glm::vec4(worldPosition, 1.0f);
+        if (clipPosition.w <= 0.0001f) {
+            return std::nullopt;
+        }
+
+        const glm::vec3 ndc = glm::vec3(clipPosition) / clipPosition.w;
+        if (ndc.x < -1.05f || ndc.x > 1.05f || ndc.y < -1.05f || ndc.y > 1.05f || ndc.z < -1.0f || ndc.z > 1.0f) {
+            return std::nullopt;
+        }
+
+        const float imageWidth = imageRectMax.x - imageRectMin.x;
+        const float imageHeight = imageRectMax.y - imageRectMin.y;
+        if (imageWidth <= 1.0f || imageHeight <= 1.0f) {
+            return std::nullopt;
+        }
+
+        const float x = imageRectMin.x + (ndc.x * 0.5f + 0.5f) * imageWidth;
+        const float y = imageRectMin.y + (1.0f - (ndc.y * 0.5f + 0.5f)) * imageHeight;
+        return ImVec2(x, y);
+    }
+
+    std::optional<ImVec2> projectViewPositionToImage(
+        const glm::vec4& viewPosition,
+        const glm::mat4& projectionMatrix,
+        const ImVec2& imageRectMin,
+        const ImVec2& imageRectMax
+    ) {
+        const glm::vec4 clipPosition = projectionMatrix * viewPosition;
+        if (std::abs(clipPosition.w) <= 0.0001f) {
+            return std::nullopt;
+        }
+
+        const glm::vec3 ndc = glm::vec3(clipPosition) / clipPosition.w;
+        if (ndc.z < -2.0f || ndc.z > 2.0f) {
+            return std::nullopt;
+        }
+
+        const float imageWidth = imageRectMax.x - imageRectMin.x;
+        const float imageHeight = imageRectMax.y - imageRectMin.y;
+        if (imageWidth <= 1.0f || imageHeight <= 1.0f) {
+            return std::nullopt;
+        }
+
+        const float x = imageRectMin.x + (ndc.x * 0.5f + 0.5f) * imageWidth;
+        const float y = imageRectMin.y + (1.0f - (ndc.y * 0.5f + 0.5f)) * imageHeight;
+        return ImVec2(x, y);
+    }
+
+    std::optional<std::pair<ImVec2, ImVec2>> projectWorldLineToImageClipped(
+        const glm::vec3& startWorld,
+        const glm::vec3& endWorld,
+        const glm::mat4& viewMatrix,
+        const glm::mat4& projectionMatrix,
+        const ImVec2& imageRectMin,
+        const ImVec2& imageRectMax,
+        float nearClipDistance
+    ) {
+        glm::vec4 startView = viewMatrix * glm::vec4(startWorld, 1.0f);
+        glm::vec4 endView = viewMatrix * glm::vec4(endWorld, 1.0f);
+
+        const float nearPlaneViewZ = -std::max(0.01f, nearClipDistance);
+        const bool startInFront = startView.z <= nearPlaneViewZ;
+        const bool endInFront = endView.z <= nearPlaneViewZ;
+
+        if (!startInFront && !endInFront) {
+            return std::nullopt;
+        }
+
+        if (startInFront != endInFront) {
+            const float deltaZ = endView.z - startView.z;
+            if (std::abs(deltaZ) <= 0.00001f) {
+                return std::nullopt;
+            }
+
+            float t = (nearPlaneViewZ - startView.z) / deltaZ;
+            t = std::clamp(t, 0.0f, 1.0f);
+            const glm::vec4 clippedView = startView + t * (endView - startView);
+            if (!startInFront) {
+                startView = clippedView;
+            } else {
+                endView = clippedView;
+            }
+        }
+
+        const std::optional<ImVec2> startProjected = projectViewPositionToImage(startView, projectionMatrix, imageRectMin, imageRectMax);
+        const std::optional<ImVec2> endProjected = projectViewPositionToImage(endView, projectionMatrix, imageRectMin, imageRectMax);
+        if (!startProjected.has_value() || !endProjected.has_value()) {
+            return std::nullopt;
+        }
+
+        return std::make_pair(startProjected.value(), endProjected.value());
+    }
+
+    ImGuizmo::OPERATION getGizmoOperationFromIndex(int operationIndex) {
+        switch (operationIndex) {
+            case 1:
+                return ImGuizmo::ROTATE;
+            case 2:
+                return ImGuizmo::SCALE;
+            case 0:
+            default:
+                return ImGuizmo::TRANSLATE;
+        }
+    }
+
+    ImGuizmo::MODE getGizmoMode(bool worldMode) {
+        return worldMode ? ImGuizmo::WORLD : ImGuizmo::LOCAL;
+    }
+
+    float normalizeDegrees180(float degrees) {
+        float normalized = std::fmod(degrees, 360.0f);
+        if (normalized > 180.0f) {
+            normalized -= 360.0f;
+        } else if (normalized < -180.0f) {
+            normalized += 360.0f;
+        }
+
+        return normalized;
+    }
+
+    float unwrapDegreesNear(float degrees, float referenceDegrees) {
+        float unwrapped = normalizeDegrees180(degrees);
+        const float reference = normalizeDegrees180(referenceDegrees);
+
+        float delta = unwrapped - reference;
+        if (delta > 180.0f) {
+            unwrapped -= 360.0f;
+        } else if (delta < -180.0f) {
+            unwrapped += 360.0f;
+        }
+
+        return unwrapped;
+    }
+
+    glm::quat quaternionFromEulerDegreesXYZ(const glm::vec3& eulerDegrees) {
+        const glm::quat qx = glm::angleAxis(glm::radians(eulerDegrees.x), glm::vec3(1.0f, 0.0f, 0.0f));
+        const glm::quat qy = glm::angleAxis(glm::radians(eulerDegrees.y), glm::vec3(0.0f, 1.0f, 0.0f));
+        const glm::quat qz = glm::angleAxis(glm::radians(eulerDegrees.z), glm::vec3(0.0f, 0.0f, 1.0f));
+        return glm::normalize(qx * qy * qz);
+    }
+
+    glm::vec3 eulerDegreesFromQuaternionXYZ(const glm::quat& rotation, const glm::vec3& referenceDegrees) {
+        const glm::mat4 rotationMatrix = glm::mat4_cast(glm::normalize(rotation));
+
+        const float r00 = rotationMatrix[0][0];
+        const float r01 = rotationMatrix[1][0];
+        const float r02 = rotationMatrix[2][0];
+        const float r10 = rotationMatrix[0][1];
+        const float r11 = rotationMatrix[1][1];
+        const float r12 = rotationMatrix[2][1];
+        const float r22 = rotationMatrix[2][2];
+
+        float xRadians = 0.0f;
+        float yRadians = 0.0f;
+        float zRadians = 0.0f;
+
+        const float clampedR02 = std::clamp(r02, -1.0f, 1.0f);
+        yRadians = std::asin(clampedR02);
+
+        constexpr float kGimbalThreshold = 0.9999f;
+        if (std::abs(clampedR02) < kGimbalThreshold) {
+            xRadians = std::atan2(-r12, r22);
+            zRadians = std::atan2(-r01, r00);
+        } else {
+            zRadians = 0.0f;
+            if (clampedR02 > 0.0f) {
+                xRadians = std::atan2(r10, r11);
+            } else {
+                xRadians = std::atan2(-r10, r11);
+            }
+        }
+
+        glm::vec3 eulerDegrees = glm::degrees(glm::vec3(xRadians, yRadians, zRadians));
+        eulerDegrees.x = unwrapDegreesNear(eulerDegrees.x, referenceDegrees.x);
+        eulerDegrees.y = unwrapDegreesNear(eulerDegrees.y, referenceDegrees.y);
+        eulerDegrees.z = unwrapDegreesNear(eulerDegrees.z, referenceDegrees.z);
+        return eulerDegrees;
+    }
+
+    glm::mat3 extractOrthonormalRotationBasis(const glm::mat4& matrix) {
+        constexpr float kEpsilon = 0.0001f;
+
+        glm::vec3 xAxis(matrix[0]);
+        glm::vec3 yAxis(matrix[1]);
+        glm::vec3 zAxis(matrix[2]);
+
+        if (glm::length(xAxis) < kEpsilon || glm::length(yAxis) < kEpsilon || glm::length(zAxis) < kEpsilon) {
+            return glm::mat3(1.0f);
+        }
+
+        xAxis = glm::normalize(xAxis);
+
+        yAxis = yAxis - xAxis * glm::dot(yAxis, xAxis);
+        if (glm::length(yAxis) < kEpsilon) {
+            yAxis = glm::cross(glm::normalize(zAxis), xAxis);
+        }
+        if (glm::length(yAxis) < kEpsilon) {
+            yAxis = glm::vec3(0.0f, 1.0f, 0.0f);
+        } else {
+            yAxis = glm::normalize(yAxis);
+        }
+
+        zAxis = glm::cross(xAxis, yAxis);
+        if (glm::length(zAxis) < kEpsilon) {
+            zAxis = glm::vec3(matrix[2]);
+        }
+        if (glm::length(zAxis) < kEpsilon) {
+            zAxis = glm::vec3(0.0f, 0.0f, 1.0f);
+        } else {
+            zAxis = glm::normalize(zAxis);
+        }
+
+        if (glm::dot(zAxis, glm::vec3(matrix[2])) < 0.0f) {
+            zAxis = -zAxis;
+            yAxis = -yAxis;
+        }
+
+        return glm::mat3(xAxis, yAxis, zAxis);
+    }
+
+    void applyMatrixToSceneTransform(const glm::mat4& matrix, SceneTransform& transform, ImGuizmo::OPERATION operation, float rotationSensitivity) {
+        float translation[3] = {0.0f, 0.0f, 0.0f};
+        float rotation[3] = {0.0f, 0.0f, 0.0f};
+        float scale[3] = {1.0f, 1.0f, 1.0f};
+        ImGuizmo::DecomposeMatrixToComponents(glm::value_ptr(matrix), translation, rotation, scale);
+
+        const glm::vec3 sizeBasis(
+            std::max(0.01f, std::abs(transform.size.x)),
+            std::max(0.01f, std::abs(transform.size.y)),
+            std::max(0.01f, std::abs(transform.size.z))
+        );
+
+        transform.position = glm::vec3(translation[0], translation[1], translation[2]);
+
+        const bool rotateOperation = operation == ImGuizmo::ROTATE;
+        if (rotateOperation) {
+            const glm::quat currentRotation = quaternionFromEulerDegreesXYZ(transform.rotation);
+            glm::quat targetRotation = glm::normalize(glm::quat_cast(extractOrthonormalRotationBasis(matrix)));
+
+            const float clampedSensitivity = std::clamp(rotationSensitivity, 0.05f, 2.0f);
+            if (std::abs(clampedSensitivity - 1.0f) > 0.001f) {
+                glm::quat deltaRotation = glm::normalize(targetRotation * glm::inverse(currentRotation));
+                float deltaAngleRadians = 2.0f * std::acos(std::clamp(deltaRotation.w, -1.0f, 1.0f));
+
+                glm::vec3 deltaAxis(deltaRotation.x, deltaRotation.y, deltaRotation.z);
+                const float axisLength = glm::length(deltaAxis);
+                if (axisLength > 0.0001f) {
+                    deltaAxis /= axisLength;
+                } else {
+                    deltaAxis = glm::vec3(0.0f, 1.0f, 0.0f);
+                }
+
+                if (deltaAngleRadians > glm::pi<float>()) {
+                    deltaAngleRadians -= glm::two_pi<float>();
+                }
+
+                const float scaledAngleRadians = deltaAngleRadians * clampedSensitivity;
+                targetRotation = glm::normalize(glm::angleAxis(scaledAngleRadians, deltaAxis) * currentRotation);
+            }
+
+            transform.rotation = eulerDegreesFromQuaternionXYZ(targetRotation, transform.rotation);
+        }
+
+        const int operationMask = static_cast<int>(operation);
+        const bool scaleOperation =
+            (operationMask & static_cast<int>(ImGuizmo::SCALE_X)) != 0 ||
+            (operationMask & static_cast<int>(ImGuizmo::SCALE_Y)) != 0 ||
+            (operationMask & static_cast<int>(ImGuizmo::SCALE_Z)) != 0 ||
+            (operationMask & static_cast<int>(ImGuizmo::SCALE_XU)) != 0 ||
+            (operationMask & static_cast<int>(ImGuizmo::SCALE_YU)) != 0 ||
+            (operationMask & static_cast<int>(ImGuizmo::SCALE_ZU)) != 0;
+
+        if (scaleOperation) {
+            transform.scale = glm::vec3(
+                std::max(0.01f, std::abs(scale[0]) / sizeBasis.x),
+                std::max(0.01f, std::abs(scale[1]) / sizeBasis.y),
+                std::max(0.01f, std::abs(scale[2]) / sizeBasis.z)
+            );
+        }
+    }
+
+    void drawWindowPanelGradient() {
+        ImDrawList* drawList = ImGui::GetWindowDrawList();
+        if (drawList == nullptr) {
+            return;
+        }
+
+        const ImVec2 windowPos = ImGui::GetWindowPos();
+        const ImVec2 windowSize = ImGui::GetWindowSize();
+        const ImVec2 windowMax(windowPos.x + windowSize.x, windowPos.y + windowSize.y);
+
+        drawList->AddRectFilledMultiColor(
+            windowPos,
+            windowMax,
+            IM_COL32(23, 28, 41, 135),
+            IM_COL32(23, 28, 41, 135),
+            IM_COL32(12, 15, 24, 170),
+            IM_COL32(12, 15, 24, 170)
+        );
+        drawList->AddRect(windowPos, windowMax, IM_COL32(54, 63, 84, 170), 0.0f, 0, 1.0f);
+    }
+
+    void drawHorizontalSceneGrid(
+        ImDrawList* drawList,
+        const glm::mat4& viewMatrix,
+        const glm::mat4& projectionMatrix,
+        const ImVec2& imageRectMin,
+        const ImVec2& imageRectMax,
+        int halfExtent,
+        float spacing
+    ) {
+        if (drawList == nullptr) {
+            return;
+        }
+
+        const int clampedHalfExtent = std::clamp(halfExtent, 1, 200);
+        const float clampedSpacing = std::clamp(spacing, 0.1f, 100.0f);
+        const float extent = static_cast<float>(clampedHalfExtent) * clampedSpacing;
+        const float nearClipDistance = 0.02f;
+
+        const ImU32 xLineColor = IM_COL32(180, 80, 80, 95);
+        const ImU32 zLineColor = IM_COL32(80, 120, 180, 95);
+        const ImU32 xAxisColor = IM_COL32(240, 90, 90, 235);
+        const ImU32 yAxisColor = IM_COL32(95, 225, 120, 235);
+        const ImU32 zAxisColor = IM_COL32(95, 145, 240, 235);
+
+        for (int lineIndex = -clampedHalfExtent; lineIndex <= clampedHalfExtent; ++lineIndex) {
+            const float x = static_cast<float>(lineIndex) * clampedSpacing;
+            const std::optional<std::pair<ImVec2, ImVec2>> projectedLine = projectWorldLineToImageClipped(
+                glm::vec3(x, 0.0f, -extent),
+                glm::vec3(x, 0.0f, extent),
+                viewMatrix,
+                projectionMatrix,
+                imageRectMin,
+                imageRectMax,
+                nearClipDistance
+            );
+
+            if (projectedLine.has_value()) {
+                const ImU32 lineColor = (lineIndex == 0) ? zAxisColor : xLineColor;
+                const float thickness = (lineIndex == 0) ? 2.2f : 1.0f;
+                drawList->AddLine(projectedLine->first, projectedLine->second, lineColor, thickness);
+            }
+        }
+
+        for (int lineIndex = -clampedHalfExtent; lineIndex <= clampedHalfExtent; ++lineIndex) {
+            const float z = static_cast<float>(lineIndex) * clampedSpacing;
+            const std::optional<std::pair<ImVec2, ImVec2>> projectedLine = projectWorldLineToImageClipped(
+                glm::vec3(-extent, 0.0f, z),
+                glm::vec3(extent, 0.0f, z),
+                viewMatrix,
+                projectionMatrix,
+                imageRectMin,
+                imageRectMax,
+                nearClipDistance
+            );
+
+            if (projectedLine.has_value()) {
+                const ImU32 lineColor = (lineIndex == 0) ? xAxisColor : zLineColor;
+                const float thickness = (lineIndex == 0) ? 2.2f : 1.0f;
+                drawList->AddLine(projectedLine->first, projectedLine->second, lineColor, thickness);
+            }
+        }
+
+        const float axisLength = std::max(2.0f, extent * 0.35f);
+        const std::optional<std::pair<ImVec2, ImVec2>> xAxis = projectWorldLineToImageClipped(
+            glm::vec3(0.0f, 0.0f, 0.0f),
+            glm::vec3(axisLength, 0.0f, 0.0f),
+            viewMatrix,
+            projectionMatrix,
+            imageRectMin,
+            imageRectMax,
+            nearClipDistance
+        );
+        const std::optional<std::pair<ImVec2, ImVec2>> yAxis = projectWorldLineToImageClipped(
+            glm::vec3(0.0f, 0.0f, 0.0f),
+            glm::vec3(0.0f, axisLength, 0.0f),
+            viewMatrix,
+            projectionMatrix,
+            imageRectMin,
+            imageRectMax,
+            nearClipDistance
+        );
+        const std::optional<std::pair<ImVec2, ImVec2>> zAxis = projectWorldLineToImageClipped(
+            glm::vec3(0.0f, 0.0f, 0.0f),
+            glm::vec3(0.0f, 0.0f, axisLength),
+            viewMatrix,
+            projectionMatrix,
+            imageRectMin,
+            imageRectMax,
+            nearClipDistance
+        );
+
+        if (xAxis.has_value()) {
+            drawList->AddLine(xAxis->first, xAxis->second, xAxisColor, 2.4f);
+            drawList->AddText(ImVec2(xAxis->second.x + 4.0f, xAxis->second.y), xAxisColor, "X");
+        }
+        if (yAxis.has_value()) {
+            drawList->AddLine(yAxis->first, yAxis->second, yAxisColor, 2.4f);
+            drawList->AddText(ImVec2(yAxis->second.x + 4.0f, yAxis->second.y), yAxisColor, "Y");
+        }
+        if (zAxis.has_value()) {
+            drawList->AddLine(zAxis->first, zAxis->second, zAxisColor, 2.4f);
+            drawList->AddText(ImVec2(zAxis->second.x + 4.0f, zAxis->second.y), zAxisColor, "Z");
+        }
+    }
+
+    bool drawColoredAxisFloatControl(const char* id, const char* axisLabel, const ImVec4& color, float* value, float speed, bool hasLimits, float minValue, float maxValue) {
+        bool changed = false;
+        ImGui::PushID(id);
+
+        ImGui::PushStyleColor(ImGuiCol_Text, color);
+        ImGui::TextUnformatted(axisLabel);
+        ImGui::PopStyleColor();
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth(92.0f);
+        changed = ImGui::DragFloat("##value", value, speed, hasLimits ? minValue : 0.0f, hasLimits ? maxValue : 0.0f, "%.3f");
+
+        ImGui::PopID();
+        return changed;
+    }
+
+    bool drawColoredVec3Control(const char* label, glm::vec3& value, float speed, bool hasLimits = false, float minValue = 0.0f, float maxValue = 0.0f) {
+        bool changed = false;
+        ImGui::TextUnformatted(label);
+        ImGui::SameLine();
+
+        changed |= drawColoredAxisFloatControl((std::string(label) + "_X").c_str(), "X", ImVec4(0.95f, 0.38f, 0.38f, 1.0f), &value.x, speed, hasLimits, minValue, maxValue);
+        ImGui::SameLine();
+        changed |= drawColoredAxisFloatControl((std::string(label) + "_Y").c_str(), "Y", ImVec4(0.36f, 0.87f, 0.44f, 1.0f), &value.y, speed, hasLimits, minValue, maxValue);
+        ImGui::SameLine();
+        changed |= drawColoredAxisFloatControl((std::string(label) + "_Z").c_str(), "Z", ImVec4(0.42f, 0.63f, 0.95f, 1.0f), &value.z, speed, hasLimits, minValue, maxValue);
+
+        return changed;
     }
 
     std::optional<float> raySphereIntersectionDistance(
@@ -420,6 +1024,7 @@ namespace Valkron {
     const char kFragmentShaderFilter[] = "Fragment Shaders\0*.frag;*.fs;*.glsl\0All Files\0*.*\0\0";
     const char kComputeShaderFilter[] = "Compute Shaders\0*.comp;*.glsl\0All Files\0*.*\0\0";
     const char kModelFileFilter[] = "Model Files\0*.obj;*.fbx;*.gltf;*.glb;*.dae;*.3ds\0All Files\0*.*\0\0";
+    const char kModelAssetDragPayloadType[] = "AssetBrowser.ModelAssetName";
 
     void UILayer::bindEngineSettings(Window* window, EngineConfig* engineConfig) {
         m_window = window;
@@ -448,9 +1053,9 @@ namespace Valkron {
     void UILayer::onAttach() {
         m_activeScene = Scene("Sandbox Scene");
 
-        m_activeScene.addEntity("Camera");
-        m_activeScene.addEntity("Directional Light");
-        m_activeScene.addEntity("Cube");
+        m_activeScene.addEntity("Camera", SceneEntityType::Camera);
+        m_activeScene.addEntity("Directional Light", SceneEntityType::Light);
+        m_activeScene.addEntity("Cube", SceneEntityType::Generic);
 
         if (const std::optional<std::size_t> cameraEntityIndex = m_activeScene.findEntityIndex("Camera"); cameraEntityIndex.has_value()) {
             if (SceneEntity* cameraEntity = m_activeScene.getEntityByIndex(cameraEntityIndex.value()); cameraEntity != nullptr) {
@@ -470,6 +1075,7 @@ namespace Valkron {
                 cubeEntity->transform.position = glm::vec3(0.0f, 0.0f, 0.0f);
                 cubeEntity->transform.scale = glm::vec3(1.0f, 1.0f, 1.0f);
                 cubeEntity->transform.size = glm::vec3(1.0f, 1.0f, 1.0f);
+                cubeEntity->modelAssetName = "Test Model";
             }
         }
 
@@ -491,6 +1097,18 @@ namespace Valkron {
         m_activeScene.setGameStateValue("SelectedEntity", "None");
 
         AssetLoader::initialize();
+
+        auto loadEntityIconTexture = [](const std::string& iconPath) -> std::shared_ptr<Texture> {
+            auto texture = std::make_shared<Texture>();
+            if (!texture->loadTexture(iconPath, false)) {
+                return nullptr;
+            }
+
+            return texture;
+        };
+
+        m_cameraEntityIconTexture = loadEntityIconTexture("assets/icons/camera.png");
+        m_lightEntityIconTexture = loadEntityIconTexture("assets/icons/light.png");
 
         const bool hasBlinnShaderAsset = std::any_of(
             m_activeScene.getAssets().begin(),
@@ -514,26 +1132,74 @@ namespace Valkron {
         m_pendingViewportHeight = 0;
         m_viewportResizeDebounceTimer = 0.0f;
         m_sceneViewImageHovered = false;
+        m_showSceneGrid = true;
+        m_sceneGridHalfExtent = 12;
+        m_sceneGridSpacing = 1.0f;
         m_sceneCameraControllerInitialized = false;
         m_runtimeTexture3DDepth = std::max(1, m_runtimeTexture3DDepth);
-        m_assetBrowserFolderFilter = "All";
+        m_assetBrowserFolderFilter.clear();
         m_selectedAssetIndex = -1;
         m_showSettingsPanel = false;
         m_showDebugPanel = false;
         m_dockspaceBuilt = false;
+        m_gizmoOperationIndex = 0;
+        m_gizmoWorldMode = false;
+
+        m_topNavbarPanelController = std::make_unique<TopNavbarPanel>([this]() {
+            drawTopNavbar();
+        });
+        m_dockspacePanelController = std::make_unique<DockspacePanel>([this]() {
+            drawDockspaceHost();
+        });
+        m_sceneHierarchyPanelController = std::make_unique<SceneHierarchyPanel>([this]() {
+            drawSceneHierarchyPanel();
+        });
+        m_sceneViewPanelController = std::make_unique<SceneViewPanel>([this](float frameDeltaTime) {
+            drawSceneViewPanel(frameDeltaTime);
+        });
+        m_inspectorPanelController = std::make_unique<InspectorPanel>([this]() {
+            drawInspectorPanel();
+        });
+        m_settingsPanelController = std::make_unique<SettingsPanel>([this]() {
+            drawSettingsPanel();
+        });
+        m_debugPanelController = std::make_unique<DebugPanel>([this]() {
+            drawDebugPanel();
+        });
+        m_assetBrowserPanelController = std::make_unique<AssetBrowserPanel>([this]() {
+            drawBottomPanel();
+        });
 
         syncEngineSettingsEditorState();
         appendTerminalLine("UI Manager attached (Dear ImGui). Editor layout ready.");
     }
 
     void UILayer::onDetach() {
+        m_topNavbarPanelController.reset();
+        m_dockspacePanelController.reset();
+        m_sceneHierarchyPanelController.reset();
+        m_sceneViewPanelController.reset();
+        m_inspectorPanelController.reset();
+        m_settingsPanelController.reset();
+        m_debugPanelController.reset();
+        m_assetBrowserPanelController.reset();
+
+        m_cameraEntityIconTexture.reset();
+        m_lightEntityIconTexture.reset();
         appendTerminalLine("UI Manager detached.");
         LOG_DEBUG("UILayer detached.");
     }
 
     void UILayer::onUpdate(float deltaTime) {
-        drawTopNavbar();
-        drawDockspaceHost();
+        if (m_topNavbarPanelController != nullptr) {
+            m_topNavbarPanelController->render(deltaTime);
+        }
+
+        if (m_dockspacePanelController != nullptr) {
+            m_dockspacePanelController->render(deltaTime);
+        }
+
+        ImGuizmo::BeginFrame();
 
         m_lastFrameDeltaTimeSeconds = std::max(0.0f, deltaTime);
 
@@ -547,26 +1213,35 @@ namespace Valkron {
             clearEntitySelection();
         }
 
-        std::vector<glm::mat4> entityWorldTransforms;
+        std::vector<SceneModelInstance> sceneModelInstances;
         std::vector<glm::vec3> lightEntityPositions;
-        entityWorldTransforms.reserve(entities.size());
+        sceneModelInstances.reserve(entities.size());
         lightEntityPositions.reserve(entities.size());
 
         std::optional<glm::mat4> runtimeCameraTransform;
         for (std::size_t entityIndex = 0; entityIndex < entities.size(); ++entityIndex) {
             const glm::mat4 worldTransform = composeEntityWorldTransformMatrix(entities, entityIndex);
-            entityWorldTransforms.push_back(worldTransform);
+            const bool cameraEntity = isCameraEntity(entities[entityIndex]);
+            const bool lightEntity = isLightEntity(entities[entityIndex]);
 
-            if (isLightEntityName(entities[entityIndex].name)) {
+            if (lightEntity) {
                 lightEntityPositions.push_back(extractWorldPosition(worldTransform));
             }
 
-            if (!runtimeCameraTransform.has_value() && isCameraEntityName(entities[entityIndex].name)) {
+            if (!runtimeCameraTransform.has_value() && cameraEntity) {
                 runtimeCameraTransform = worldTransform;
+            }
+
+            if (!cameraEntity && !lightEntity && !entities[entityIndex].modelAssetName.empty()) {
+                sceneModelInstances.push_back(SceneModelInstance{
+                    entities[entityIndex].modelAssetName,
+                    worldTransform,
+                    static_cast<int>(entityIndex) == m_selectedEntityIndex
+                });
             }
         }
 
-        Renderer::setSceneEntityTransforms(entityWorldTransforms, m_selectedEntityIndex);
+        Renderer::setSceneModelInstances(sceneModelInstances);
         Renderer::setLightEntityPositions(lightEntityPositions);
 
         m_runtimeEntityCameraActive = false;
@@ -578,27 +1253,39 @@ namespace Valkron {
         }
 
         if (m_showSceneHierarchyPanel) {
-            drawSceneHierarchyPanel();
+            if (m_sceneHierarchyPanelController != nullptr) {
+                m_sceneHierarchyPanelController->render(deltaTime);
+            }
         }
 
         if (m_showSceneViewPanel) {
-            drawSceneViewPanel(deltaTime);
+            if (m_sceneViewPanelController != nullptr) {
+                m_sceneViewPanelController->render(deltaTime);
+            }
         }
 
         if (m_showInspectorPanel) {
-            drawInspectorPanel();
+            if (m_inspectorPanelController != nullptr) {
+                m_inspectorPanelController->render(deltaTime);
+            }
         }
 
         if (m_showSettingsPanel) {
-            drawSettingsPanel();
+            if (m_settingsPanelController != nullptr) {
+                m_settingsPanelController->render(deltaTime);
+            }
         }
 
         if (m_showBottomPanel) {
-            drawBottomPanel();
+            if (m_assetBrowserPanelController != nullptr) {
+                m_assetBrowserPanelController->render(deltaTime);
+            }
         }
 
         if (m_showDebugPanel) {
-            drawDebugPanel();
+            if (m_debugPanelController != nullptr) {
+                m_debugPanelController->render(deltaTime);
+            }
         }
 
         m_resetLayoutRequested = false;
@@ -707,6 +1394,22 @@ namespace Valkron {
                 changedCamera = true;
             }
             ImGui::Checkbox("Invert Pan", &m_sceneCameraInvertPan);
+
+            ImGui::Spacing();
+            ImGui::Separator();
+            ImGui::TextDisabled("Grid");
+            ImGui::Checkbox("Show Grid", &m_showSceneGrid);
+            ImGui::SetNextItemWidth(120.0f);
+            ImGui::SliderInt("Grid Half Extent", &m_sceneGridHalfExtent, 2, 64);
+            ImGui::SetNextItemWidth(120.0f);
+            ImGui::SliderFloat("Grid Spacing", &m_sceneGridSpacing, 0.25f, 10.0f, "%.2f");
+
+            ImGui::Spacing();
+            ImGui::Separator();
+            ImGui::TextDisabled("Gizmo");
+            ImGui::BulletText("W: Translate");
+            ImGui::BulletText("E: Rotate");
+            ImGui::BulletText("R: Scale");
 
             if (ImGui::Button("Reset Camera")) {
                 m_sceneCameraPivot = glm::vec3(0.0f, 0.0f, 0.0f);
@@ -828,9 +1531,17 @@ namespace Valkron {
             return false;
         }
 
-        AssetLoader::setActiveModel(modelName);
         m_activeScene.addAsset(modelName, modelPath);
-        appendTerminalLine("Imported model and set active: " + modelName);
+
+        const int importedMaterialTextures = registerImportedModelMaterialTextures(m_activeScene, modelName);
+        if (importedMaterialTextures > 0) {
+            appendTerminalLine(
+                "Imported " + std::to_string(importedMaterialTextures) +
+                " material texture(s) for model " + modelName + "."
+            );
+        }
+
+        appendTerminalLine("Imported model asset: " + modelName + ". Drag it into Scene View to create an entity.");
         return true;
     }
 
@@ -871,9 +1582,17 @@ namespace Valkron {
                 return false;
             }
 
-            AssetLoader::setActiveModel(modelName);
             m_activeScene.addAsset(modelName, assetPath);
-            appendTerminalLine("Imported model and set active: " + modelName);
+
+            const int importedMaterialTextures = registerImportedModelMaterialTextures(m_activeScene, modelName);
+            if (importedMaterialTextures > 0) {
+                appendTerminalLine(
+                    "Imported " + std::to_string(importedMaterialTextures) +
+                    " material texture(s) for model " + modelName + "."
+                );
+            }
+
+            appendTerminalLine("Imported model asset: " + modelName + ". Drag it into Scene View to create an entity.");
             return true;
         }
 
@@ -928,1045 +1647,6 @@ namespace Valkron {
 
         m_scrollTerminalToBottom = true;
         LOG_INFO("UI: " + line);
-    }
-
-    void UILayer::drawTopNavbar() {
-        if (!ImGui::BeginMainMenuBar()) {
-            return;
-        }
-
-        if (ImGui::BeginMenu("File")) {
-            if (ImGui::MenuItem("New Scene")) {
-                appendTerminalLine("TODO: New Scene flow will be implemented.");
-            }
-            if (ImGui::MenuItem("Open Scene")) {
-                appendTerminalLine("TODO: Open Scene flow will be implemented.");
-            }
-            if (ImGui::MenuItem("Save Scene")) {
-                appendTerminalLine("TODO: Save Scene flow will be implemented.");
-            }
-            ImGui::EndMenu();
-        }
-
-        if (ImGui::BeginMenu("Scene")) {
-            const bool isEdit = m_activeScene.getState() == SceneState::Edit;
-            const bool isPlay = m_activeScene.getState() == SceneState::Play;
-            const bool isPause = m_activeScene.getState() == SceneState::Pause;
-
-            if (ImGui::MenuItem("Edit Mode", nullptr, isEdit)) {
-                m_activeScene.setState(SceneState::Edit);
-                m_activeScene.setGameStateValue("Mode", "Edit");
-                appendTerminalLine("Scene switched to Edit mode.");
-            }
-            if (ImGui::MenuItem("Play Mode", nullptr, isPlay)) {
-                m_activeScene.setState(SceneState::Play);
-                m_activeScene.setGameStateValue("Mode", "Play");
-                appendTerminalLine("Scene switched to Play mode.");
-            }
-            if (ImGui::MenuItem("Pause Mode", nullptr, isPause)) {
-                m_activeScene.setState(SceneState::Pause);
-                m_activeScene.setGameStateValue("Mode", "Pause");
-                appendTerminalLine("Scene switched to Pause mode.");
-            }
-            ImGui::EndMenu();
-        }
-
-        if (ImGui::BeginMenu("Window")) {
-            ImGui::MenuItem("Scene Hierarchy", nullptr, &m_showSceneHierarchyPanel);
-            ImGui::MenuItem("Scene View", nullptr, &m_showSceneViewPanel);
-            ImGui::MenuItem("Inspector", nullptr, &m_showInspectorPanel);
-            ImGui::MenuItem("Asset Browser", nullptr, &m_showBottomPanel);
-            ImGui::MenuItem("Debug Panel", nullptr, &m_showDebugPanel);
-            ImGui::Separator();
-            if (ImGui::MenuItem("Reset Layout")) {
-                m_showSceneHierarchyPanel = true;
-                m_showSceneViewPanel = true;
-                m_showInspectorPanel = true;
-                m_showSettingsPanel = false;
-                m_showBottomPanel = true;
-                m_showDebugPanel = false;
-                m_resetLayoutRequested = true;
-                appendTerminalLine("Editor layout reset to default window arrangement.");
-            }
-            ImGui::EndMenu();
-        }
-
-        if (ImGui::BeginMenu("Settings")) {
-            if (ImGui::MenuItem("Open Settings")) {
-                m_showSettingsPanel = true;
-            }
-            if (m_showSettingsPanel && ImGui::MenuItem("Close Settings")) {
-                m_showSettingsPanel = false;
-            }
-            if (ImGui::MenuItem("Reload Engine Settings In Editor")) {
-                syncEngineSettingsEditorState();
-                appendTerminalLine("Settings editor reloaded from current engine config.");
-            }
-            ImGui::EndMenu();
-        }
-
-        ImGui::Separator();
-        ImGui::Text("Scene: %s", m_activeScene.getName().c_str());
-
-        ImGui::EndMainMenuBar();
-    }
-
-    void UILayer::drawDockspaceHost() {
-        ImGuiIO& io = ImGui::GetIO();
-        if ((io.ConfigFlags & ImGuiConfigFlags_DockingEnable) == 0) {
-            return;
-        }
-
-        ImGuiViewport* viewport = ImGui::GetMainViewport();
-        ImGuiID dockspaceID = ImGui::DockSpaceOverViewport(0, viewport, ImGuiDockNodeFlags_None);
-
-        if (!m_dockspaceBuilt || m_resetLayoutRequested) {
-            m_dockspaceBuilt = true;
-
-            ImGui::DockBuilderRemoveNode(dockspaceID);
-            ImGui::DockBuilderAddNode(dockspaceID, ImGuiDockNodeFlags_DockSpace);
-            ImGui::DockBuilderSetNodeSize(dockspaceID, viewport->WorkSize);
-
-            ImGuiID dockMain = dockspaceID;
-            const ImGuiID dockLeft = ImGui::DockBuilderSplitNode(dockMain, ImGuiDir_Left, 0.20f, nullptr, &dockMain);
-            const ImGuiID dockRight = ImGui::DockBuilderSplitNode(dockMain, ImGuiDir_Right, 0.24f, nullptr, &dockMain);
-            const ImGuiID dockBottom = ImGui::DockBuilderSplitNode(dockMain, ImGuiDir_Down, 0.30f, nullptr, &dockMain);
-
-            ImGui::DockBuilderDockWindow("Scene Hierarchy", dockLeft);
-            ImGui::DockBuilderDockWindow("Scene View", dockMain);
-            ImGui::DockBuilderDockWindow("Inspector", dockRight);
-            ImGui::DockBuilderDockWindow("Asset Browser", dockBottom);
-
-            ImGui::DockBuilderFinish(dockspaceID);
-        }
-    }
-
-    void UILayer::drawSceneHierarchyPanel() {
-        if (!ImGui::Begin("Scene Hierarchy", &m_showSceneHierarchyPanel)) {
-            ImGui::End();
-            return;
-        }
-
-        const auto& entities = m_activeScene.getEntityData();
-        if (m_selectedEntityIndex >= static_cast<int>(entities.size())) {
-            clearEntitySelection();
-        }
-
-        ImGui::Text("Scene: %s", m_activeScene.getName().c_str());
-        ImGui::SameLine();
-        ImGui::TextDisabled("| Hierarchy");
-        ImGui::Text("Entities: %d", static_cast<int>(entities.size()));
-
-        ImGui::SetNextItemWidth(-1.0f);
-        ImGui::InputTextWithHint("##HierarchySearch", "Search entities...", m_hierarchySearchBuffer.data(), m_hierarchySearchBuffer.size());
-        const std::string searchFilter = toLowercase(std::string(m_hierarchySearchBuffer.data()));
-        const bool hasSearchFilter = !searchFilter.empty();
-        ImGui::Separator();
-
-        std::vector<std::vector<std::size_t>> childrenByParent(entities.size());
-        for (std::size_t i = 0; i < entities.size(); ++i) {
-            const int parentIndex = entities[i].parentIndex;
-            if (parentIndex >= 0 && parentIndex < static_cast<int>(entities.size())) {
-                childrenByParent[static_cast<std::size_t>(parentIndex)].push_back(i);
-            }
-        }
-
-        std::optional<std::size_t> pendingDeleteEntity;
-        std::optional<std::size_t> pendingDuplicateEntity;
-        std::optional<std::size_t> pendingCreateChildEntity;
-        std::optional<std::pair<std::size_t, std::size_t>> pendingReparentEntity;
-        std::optional<std::size_t> pendingClearParentByDrop;
-
-        ImGui::TextDisabled("Drag entities here to place them at scene root");
-        const bool rootSelected = m_selectedEntityIndex < 0;
-        if (ImGui::Selectable("Scene Root", rootSelected, ImGuiSelectableFlags_SpanAvailWidth)) {
-            clearEntitySelection();
-        }
-        if (ImGui::BeginDragDropTarget()) {
-            if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("SceneHierarchy.EntityIndex")) {
-                if (payload->DataSize == sizeof(std::size_t)) {
-                    pendingClearParentByDrop = *static_cast<const std::size_t*>(payload->Data);
-                }
-            }
-            ImGui::EndDragDropTarget();
-        }
-        ImGui::Separator();
-
-        std::vector<std::string> lowerEntityNames;
-        lowerEntityNames.reserve(entities.size());
-        for (const SceneEntity& entity : entities) {
-            lowerEntityNames.push_back(toLowercase(entity.name));
-        }
-
-        std::function<bool(std::size_t)> subtreeMatchesFilter = [&](std::size_t entityIndex) {
-            if (entityIndex >= entities.size()) {
-                return false;
-            }
-
-            if (!hasSearchFilter) {
-                return true;
-            }
-
-            if (lowerEntityNames[entityIndex].find(searchFilter) != std::string::npos) {
-                return true;
-            }
-
-            for (std::size_t childIndex : childrenByParent[entityIndex]) {
-                if (subtreeMatchesFilter(childIndex)) {
-                    return true;
-                }
-            }
-
-            return false;
-        };
-
-        std::function<void(std::size_t)> drawEntityNode = [&](std::size_t entityIndex) {
-            if (entityIndex >= entities.size() || !subtreeMatchesFilter(entityIndex)) {
-                return;
-            }
-
-            const SceneEntity& entity = entities[entityIndex];
-            const bool hasChildren = !childrenByParent[entityIndex].empty();
-            const bool selected = m_selectedEntityIndex == static_cast<int>(entityIndex);
-
-            ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnArrow | ImGuiTreeNodeFlags_OpenOnDoubleClick | ImGuiTreeNodeFlags_SpanAvailWidth | ImGuiTreeNodeFlags_FramePadding;
-            if (!hasChildren) {
-                flags |= ImGuiTreeNodeFlags_Leaf;
-            }
-            if (selected) {
-                flags |= ImGuiTreeNodeFlags_Selected;
-            }
-
-            ImVec4 badgeColor = getEntityBadgeColor(entity);
-            if (selected) {
-                badgeColor = brightenColor(badgeColor, 0.12f);
-            }
-
-            ImGui::PushStyleColor(ImGuiCol_Header, badgeColor);
-            ImGui::PushStyleColor(ImGuiCol_HeaderHovered, brightenColor(badgeColor, 0.08f));
-            ImGui::PushStyleColor(ImGuiCol_HeaderActive, brightenColor(badgeColor, 0.14f));
-
-            std::string treeLabel = std::string(getEntityIconToken(entity)) + " [" + getEntityCategoryToken(entity) + "] " + entity.name;
-            if (hasChildren) {
-                treeLabel += "  {" + std::to_string(childrenByParent[entityIndex].size()) + "}";
-            }
-
-            const bool nodeOpen = ImGui::TreeNodeEx(reinterpret_cast<void*>(static_cast<intptr_t>(entityIndex + 1)), flags, "%s", treeLabel.c_str());
-            ImGui::PopStyleColor(3);
-
-            if (ImGui::IsItemClicked(ImGuiMouseButton_Left)) {
-                setSelectedEntity(static_cast<int>(entityIndex));
-            }
-
-            if (ImGui::BeginDragDropSource(ImGuiDragDropFlags_SourceAllowNullID)) {
-                const std::size_t payloadEntityIndex = entityIndex;
-                ImGui::SetDragDropPayload("SceneHierarchy.EntityIndex", &payloadEntityIndex, sizeof(payloadEntityIndex));
-                ImGui::Text("Reparent %s", entity.name.c_str());
-                ImGui::EndDragDropSource();
-            }
-
-            if (ImGui::BeginDragDropTarget()) {
-                if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("SceneHierarchy.EntityIndex")) {
-                    if (payload->DataSize == sizeof(std::size_t)) {
-                        const std::size_t sourceEntityIndex = *static_cast<const std::size_t*>(payload->Data);
-                        if (sourceEntityIndex != entityIndex) {
-                            pendingReparentEntity = std::make_pair(sourceEntityIndex, entityIndex);
-                        }
-                    }
-                }
-                ImGui::EndDragDropTarget();
-            }
-
-            if (ImGui::BeginPopupContextItem()) {
-                if (ImGui::MenuItem("Select")) {
-                    setSelectedEntity(static_cast<int>(entityIndex));
-                }
-                if (ImGui::MenuItem("Create Child Entity")) {
-                    pendingCreateChildEntity = entityIndex;
-                }
-                if (ImGui::MenuItem("Duplicate Entity")) {
-                    pendingDuplicateEntity = entityIndex;
-                }
-                if (entity.parentIndex >= 0 && ImGui::MenuItem("Clear Parent")) {
-                    if (m_activeScene.setEntityParent(entityIndex, std::nullopt)) {
-                        appendTerminalLine("Removed parent from " + entity.name + ".");
-                    }
-                }
-                ImGui::Separator();
-                if (ImGui::MenuItem("Delete Entity")) {
-                    pendingDeleteEntity = entityIndex;
-                }
-                ImGui::EndPopup();
-            }
-
-            if (nodeOpen) {
-                for (std::size_t childIndex : childrenByParent[entityIndex]) {
-                    drawEntityNode(childIndex);
-                }
-                ImGui::TreePop();
-            }
-        };
-
-        bool drewAnyNode = false;
-        for (std::size_t i = 0; i < entities.size(); ++i) {
-            const int parentIndex = entities[i].parentIndex;
-            if (parentIndex < 0 || parentIndex >= static_cast<int>(entities.size())) {
-                drawEntityNode(i);
-                drewAnyNode = true;
-            }
-        }
-
-        if (!drewAnyNode && !entities.empty() && !hasSearchFilter) {
-            for (std::size_t i = 0; i < entities.size(); ++i) {
-                drawEntityNode(i);
-            }
-        }
-
-        if (entities.empty()) {
-            ImGui::TextDisabled("No entities in this scene.");
-        } else if (hasSearchFilter && !drewAnyNode) {
-            ImGui::TextDisabled("No entities matched your search.");
-        }
-
-        if (ImGui::BeginPopupContextWindow("SceneHierarchyWindowContext", ImGuiPopupFlags_MouseButtonRight | ImGuiPopupFlags_NoOpenOverItems)) {
-            if (ImGui::MenuItem("Add Empty Entity")) {
-                const std::string entityName = m_activeScene.makeUniqueEntityName("Entity");
-                m_activeScene.addEntity(entityName);
-                appendTerminalLine("Created " + entityName + ".");
-            }
-            if (m_selectedEntityIndex >= 0 && m_selectedEntityIndex < static_cast<int>(entities.size()) && ImGui::MenuItem("Create Child From Selection")) {
-                pendingCreateChildEntity = static_cast<std::size_t>(m_selectedEntityIndex);
-            }
-            ImGui::EndPopup();
-        }
-
-        ImGui::Separator();
-        if (ImGui::Button("Add Empty Entity")) {
-            const std::string entityName = m_activeScene.makeUniqueEntityName("Entity");
-            m_activeScene.addEntity(entityName);
-            appendTerminalLine("Created " + entityName + ".");
-        }
-
-        ImGui::SameLine();
-        if (ImGui::Button("Clear Selection")) {
-            clearEntitySelection();
-        }
-
-        ImGui::SameLine();
-        const bool hasSelection = m_selectedEntityIndex >= 0 && m_selectedEntityIndex < static_cast<int>(entities.size());
-        if (!hasSelection) {
-            ImGui::BeginDisabled();
-        }
-
-        if (ImGui::Button("Delete Selected") && hasSelection) {
-            pendingDeleteEntity = static_cast<std::size_t>(m_selectedEntityIndex);
-        }
-
-        if (!hasSelection) {
-            ImGui::EndDisabled();
-        }
-
-        const auto processDelete = [&](std::size_t entityIndex) {
-            const auto& currentEntities = m_activeScene.getEntityData();
-            if (entityIndex >= currentEntities.size()) {
-                return;
-            }
-
-            const std::string removedEntityName = currentEntities[entityIndex].name;
-            if (m_activeScene.removeEntity(removedEntityName)) {
-                appendTerminalLine("Removed " + removedEntityName + ".");
-            }
-
-            if (m_selectedEntityIndex == static_cast<int>(entityIndex)) {
-                clearEntitySelection();
-                return;
-            }
-
-            if (m_selectedEntityIndex > static_cast<int>(entityIndex)) {
-                --m_selectedEntityIndex;
-            }
-
-            const auto& updatedEntities = m_activeScene.getEntityData();
-            if (m_selectedEntityIndex >= 0 && m_selectedEntityIndex < static_cast<int>(updatedEntities.size())) {
-                setSelectedEntity(m_selectedEntityIndex);
-            } else {
-                clearEntitySelection();
-            }
-        };
-
-        if (pendingClearParentByDrop.has_value()) {
-            const auto& currentEntities = m_activeScene.getEntityData();
-            if (pendingClearParentByDrop.value() < currentEntities.size()) {
-                const std::string movedEntityName = currentEntities[pendingClearParentByDrop.value()].name;
-                if (m_activeScene.setEntityParent(pendingClearParentByDrop.value(), std::nullopt)) {
-                    appendTerminalLine("Moved " + movedEntityName + " to root.");
-                }
-            }
-        }
-
-        if (pendingReparentEntity.has_value()) {
-            const std::size_t sourceEntityIndex = pendingReparentEntity->first;
-            const std::size_t targetParentIndex = pendingReparentEntity->second;
-
-            const auto& currentEntities = m_activeScene.getEntityData();
-            if (sourceEntityIndex < currentEntities.size() && targetParentIndex < currentEntities.size()) {
-                const std::string sourceName = currentEntities[sourceEntityIndex].name;
-                const std::string parentName = currentEntities[targetParentIndex].name;
-
-                if (m_activeScene.setEntityParent(sourceEntityIndex, targetParentIndex)) {
-                    appendTerminalLine("Reparented " + sourceName + " under " + parentName + ".");
-                } else {
-                    appendTerminalLine("Unable to reparent " + sourceName + " under " + parentName + ".");
-                }
-            }
-        }
-
-        if (pendingCreateChildEntity.has_value()) {
-            const auto& currentEntities = m_activeScene.getEntityData();
-            if (pendingCreateChildEntity.value() < currentEntities.size()) {
-                const std::string parentName = currentEntities[pendingCreateChildEntity.value()].name;
-                const std::string childName = m_activeScene.makeUniqueEntityName(parentName + "_Child");
-                m_activeScene.addEntity(childName);
-
-                const std::optional<std::size_t> childIndex = m_activeScene.findEntityIndex(childName);
-                if (childIndex.has_value() && m_activeScene.setEntityParent(childIndex.value(), pendingCreateChildEntity.value())) {
-                    setSelectedEntity(static_cast<int>(childIndex.value()));
-                    appendTerminalLine("Created child entity " + childName + " under " + parentName + ".");
-                }
-            }
-        }
-
-        if (pendingDuplicateEntity.has_value()) {
-            const auto& currentEntities = m_activeScene.getEntityData();
-            if (pendingDuplicateEntity.value() < currentEntities.size()) {
-                const SceneEntity sourceEntity = currentEntities[pendingDuplicateEntity.value()];
-                const std::string duplicatedName = m_activeScene.makeUniqueEntityName(sourceEntity.name + "_Copy");
-                m_activeScene.addEntity(duplicatedName);
-
-                const std::optional<std::size_t> duplicatedIndex = m_activeScene.findEntityIndex(duplicatedName);
-                if (duplicatedIndex.has_value()) {
-                    SceneEntity* duplicatedEntity = m_activeScene.getEntityByIndex(duplicatedIndex.value());
-                    if (duplicatedEntity != nullptr) {
-                        duplicatedEntity->transform = sourceEntity.transform;
-                        duplicatedEntity->parentIndex = sourceEntity.parentIndex;
-                    }
-
-                    setSelectedEntity(static_cast<int>(duplicatedIndex.value()));
-                    appendTerminalLine("Duplicated entity " + sourceEntity.name + " as " + duplicatedName + ".");
-                }
-            }
-        }
-
-        if (pendingDeleteEntity.has_value()) {
-            processDelete(pendingDeleteEntity.value());
-        }
-
-        if (ImGui::IsWindowHovered(ImGuiHoveredFlags_AllowWhenBlockedByPopup) &&
-            ImGui::IsMouseClicked(ImGuiMouseButton_Left) &&
-            !ImGui::IsAnyItemHovered()) {
-            clearEntitySelection();
-        }
-
-        ImGui::End();
-    }
-
-    void UILayer::drawSceneViewPanel(float deltaTime) {
-        const ImGuiWindowFlags windowFlags = ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse;
-        if (!ImGui::Begin("Scene View", &m_showSceneViewPanel, windowFlags)) {
-            ImGui::End();
-            return;
-        }
-
-        ImGui::Text("Renderer Output");
-        ImGui::Separator();
-        ImGui::Text("Frame dt: %.3f ms", deltaTime * 1000.0f);
-        ImGui::Text("FPS: %.1f", deltaTime > 0.0f ? (1.0f / deltaTime) : 0.0f);
-        ImGui::Text("Mode: %s", sceneStateToString(m_activeScene.getState()));
-
-        const auto& entities = m_activeScene.getEntityData();
-        const bool hasSelectedEntity = m_selectedEntityIndex >= 0 && m_selectedEntityIndex < static_cast<int>(entities.size());
-        ImGui::Text("Selected Entity: %s", hasSelectedEntity ? entities[static_cast<std::size_t>(m_selectedEntityIndex)].name.c_str() : "None");
-
-        if (ImGui::BeginCombo("Scene Selection", hasSelectedEntity ? entities[static_cast<std::size_t>(m_selectedEntityIndex)].name.c_str() : "None")) {
-            if (ImGui::Selectable("None", !hasSelectedEntity)) {
-                clearEntitySelection();
-            }
-
-            for (std::size_t i = 0; i < entities.size(); ++i) {
-                const bool selected = static_cast<int>(i) == m_selectedEntityIndex;
-                if (ImGui::Selectable(entities[i].name.c_str(), selected)) {
-                    setSelectedEntity(static_cast<int>(i));
-                }
-
-                if (selected) {
-                    ImGui::SetItemDefaultFocus();
-                }
-            }
-
-            ImGui::EndCombo();
-        }
-
-        ImGui::SameLine();
-        if (ImGui::Button("Deselect##SceneViewSelection")) {
-            clearEntitySelection();
-        }
-
-        ImGui::Spacing();
-        const ImVec2 availableRegion = ImGui::GetContentRegionAvail();
-
-        if (availableRegion.x > 2.0f && availableRegion.y > 2.0f) {
-            const int desiredViewportWidth = std::max(1, static_cast<int>(availableRegion.x));
-            const int desiredViewportHeight = std::max(1, static_cast<int>(availableRegion.y));
-
-            const bool viewportSizeChanged = desiredViewportWidth != m_pendingViewportWidth || desiredViewportHeight != m_pendingViewportHeight;
-            if (viewportSizeChanged) {
-                m_pendingViewportWidth = desiredViewportWidth;
-                m_pendingViewportHeight = desiredViewportHeight;
-                m_viewportResizeDebounceTimer = 0.0f;
-            } else {
-                m_viewportResizeDebounceTimer += std::max(0.0f, deltaTime);
-            }
-
-            const int currentViewportWidth = Renderer::getViewportWidth();
-            const int currentViewportHeight = Renderer::getViewportHeight();
-            const bool needsViewportResize = currentViewportWidth != m_pendingViewportWidth || currentViewportHeight != m_pendingViewportHeight;
-
-            if (needsViewportResize && (
-                m_viewportResizeDebounceTimer >= m_viewportResizeDebounceDelaySeconds ||
-                currentViewportWidth <= 0 ||
-                currentViewportHeight <= 0
-            )) {
-                Renderer::setViewportSize(m_pendingViewportWidth, m_pendingViewportHeight);
-                m_viewportResizeDebounceTimer = 0.0f;
-            }
-        }
-
-        const unsigned int frameTextureID = Renderer::getFrameTextureID();
-        const int renderWidth = Renderer::getViewportWidth();
-        const int renderHeight = Renderer::getViewportHeight();
-
-        ImGui::Text("Render Target: %dx%d", renderWidth, renderHeight);
-
-        if (frameTextureID == 0 || renderWidth <= 0 || renderHeight <= 0 || availableRegion.x <= 2.0f || availableRegion.y <= 2.0f) {
-            m_sceneViewImageHovered = false;
-            ImGui::TextDisabled("Renderer output is not ready yet.");
-            ImGui::TextWrapped("Camera controls: MMB orbit, wheel zoom, Ctrl+RMB pan, RMB options.");
-            ImGui::End();
-            return;
-        }
-
-        const float renderAspect = static_cast<float>(renderWidth) / static_cast<float>(renderHeight);
-        float imageWidth = availableRegion.x;
-        float imageHeight = imageWidth / renderAspect;
-
-        if (imageHeight > availableRegion.y) {
-            imageHeight = availableRegion.y;
-            imageWidth = imageHeight * renderAspect;
-        }
-
-        const float xOffset = (availableRegion.x - imageWidth) * 0.5f;
-        const float yOffset = (availableRegion.y - imageHeight) * 0.5f;
-        if (xOffset > 0.0f) {
-            ImGui::SetCursorPosX(ImGui::GetCursorPosX() + xOffset);
-        }
-        if (yOffset > 0.0f) {
-            ImGui::SetCursorPosY(ImGui::GetCursorPosY() + yOffset);
-        }
-
-        const ImTextureID textureHandle = (ImTextureID)(uintptr_t)frameTextureID;
-        ImGui::Image(textureHandle, ImVec2(imageWidth, imageHeight), ImVec2(0.0f, 1.0f), ImVec2(1.0f, 0.0f));
-
-        const ImVec2 imageRectMin = ImGui::GetItemRectMin();
-        const ImVec2 imageRectMax = ImGui::GetItemRectMax();
-        const bool imageClicked = ImGui::IsItemClicked(ImGuiMouseButton_Left);
-        m_sceneViewImageHovered = ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenBlockedByPopup);
-
-        if (imageClicked && !ImGui::IsMouseDragging(ImGuiMouseButton_Left)) {
-            const float imageRectWidth = imageRectMax.x - imageRectMin.x;
-            const float imageRectHeight = imageRectMax.y - imageRectMin.y;
-            if (imageRectWidth > 1.0f && imageRectHeight > 1.0f) {
-                const ImVec2 mousePosition = ImGui::GetIO().MousePos;
-                const float ndcX = ((mousePosition.x - imageRectMin.x) / imageRectWidth) * 2.0f - 1.0f;
-                const float ndcY = 1.0f - ((mousePosition.y - imageRectMin.y) / imageRectHeight) * 2.0f;
-
-                const glm::mat4 viewProjection = Renderer::getCameraProjectionMatrix() * Renderer::getCameraViewMatrix();
-                const glm::mat4 inverseViewProjection = glm::inverse(viewProjection);
-
-                glm::vec4 nearPoint = inverseViewProjection * glm::vec4(ndcX, ndcY, -1.0f, 1.0f);
-                glm::vec4 farPoint = inverseViewProjection * glm::vec4(ndcX, ndcY, 1.0f, 1.0f);
-
-                if (std::abs(nearPoint.w) > 0.0001f && std::abs(farPoint.w) > 0.0001f) {
-                    nearPoint /= nearPoint.w;
-                    farPoint /= farPoint.w;
-
-                    const glm::vec3 rayOrigin = glm::vec3(nearPoint);
-                    const glm::vec3 rayDirection = glm::normalize(glm::vec3(farPoint - nearPoint));
-
-                    const auto& currentEntities = m_activeScene.getEntityData();
-                    int pickedEntityIndex = -1;
-                    float nearestDistance = std::numeric_limits<float>::max();
-
-                    for (std::size_t entityIndex = 0; entityIndex < currentEntities.size(); ++entityIndex) {
-                        const glm::mat4 worldTransform = composeEntityWorldTransformMatrix(currentEntities, entityIndex);
-                        const glm::vec3 entityCenter = extractWorldPosition(worldTransform);
-
-                        const SceneTransform& transform = currentEntities[entityIndex].transform;
-                        const glm::vec3 extents(
-                            std::max(0.05f, std::abs(transform.size.x * transform.scale.x)),
-                            std::max(0.05f, std::abs(transform.size.y * transform.scale.y)),
-                            std::max(0.05f, std::abs(transform.size.z * transform.scale.z))
-                        );
-                        const float sphereRadius = std::max(0.2f, 0.5f * std::max({extents.x, extents.y, extents.z}));
-
-                        const std::optional<float> hitDistance = raySphereIntersectionDistance(rayOrigin, rayDirection, entityCenter, sphereRadius);
-                        if (!hitDistance.has_value()) {
-                            continue;
-                        }
-
-                        if (hitDistance.value() < nearestDistance) {
-                            nearestDistance = hitDistance.value();
-                            pickedEntityIndex = static_cast<int>(entityIndex);
-                        }
-                    }
-
-                    if (pickedEntityIndex >= 0) {
-                        setSelectedEntity(pickedEntityIndex);
-                    } else {
-                        clearEntitySelection();
-                    }
-                } else {
-                    clearEntitySelection();
-                }
-            } else {
-                clearEntitySelection();
-            }
-        }
-
-        if (!m_runtimeEntityCameraActive) {
-            updateSceneCameraController(m_sceneViewImageHovered);
-        }
-
-        ImGui::Spacing();
-        if (m_runtimeEntityCameraActive) {
-            ImGui::TextDisabled("Runtime camera entity drives view (Play mode).");
-        } else {
-            ImGui::TextDisabled("MMB: Orbit  |  Wheel: Zoom  |  Ctrl+RMB: Pan  |  RMB: Options");
-        }
-
-        ImGui::End();
-    }
-
-    void UILayer::drawInspectorPanel() {
-        if (!ImGui::Begin("Inspector", &m_showInspectorPanel)) {
-            ImGui::End();
-            return;
-        }
-
-        const auto& entities = m_activeScene.getEntityData();
-        const bool hasSelection = m_selectedEntityIndex >= 0 && m_selectedEntityIndex < static_cast<int>(entities.size());
-
-        ImGui::Text("Scene Element Inspector");
-        ImGui::Separator();
-        ImGui::Text("Scene: %s", m_activeScene.getName().c_str());
-        ImGui::Text("State: %s", sceneStateToString(m_activeScene.getState()));
-        ImGui::Text("Entities: %d", static_cast<int>(entities.size()));
-        ImGui::Text("Assets: %d", static_cast<int>(m_activeScene.getAssets().size()));
-
-        if (!hasSelection) {
-            ImGui::Spacing();
-            ImGui::Separator();
-            ImGui::TextDisabled("No selected entity.");
-            ImGui::TextWrapped("Select an entity from Scene Hierarchy to edit transform, parent, and metadata.");
-            ImGui::End();
-            return;
-        }
-
-        SceneEntity* selectedEntity = m_activeScene.getEntityByIndex(static_cast<std::size_t>(m_selectedEntityIndex));
-        if (selectedEntity == nullptr) {
-            ImGui::End();
-            return;
-        }
-
-        if (m_selectedEntityNameBufferEntityIndex != m_selectedEntityIndex) {
-            std::fill(m_selectedEntityNameBuffer.begin(), m_selectedEntityNameBuffer.end(), '\0');
-            std::snprintf(m_selectedEntityNameBuffer.data(), m_selectedEntityNameBuffer.size(), "%s", selectedEntity->name.c_str());
-            m_selectedEntityNameBufferEntityIndex = m_selectedEntityIndex;
-        }
-
-        ImGui::Spacing();
-        ImGui::Separator();
-        ImGui::Text("Entity");
-
-        ImGui::InputText("Name", m_selectedEntityNameBuffer.data(), m_selectedEntityNameBuffer.size());
-        ImGui::SameLine();
-        if (ImGui::Button("Apply Name")) {
-            std::string desiredName = std::string(m_selectedEntityNameBuffer.data());
-            if (desiredName.empty()) {
-                desiredName = "Entity";
-            }
-
-            if (desiredName != selectedEntity->name) {
-                std::string appliedName = desiredName;
-                if (m_activeScene.findEntityIndex(desiredName).has_value()) {
-                    appliedName = m_activeScene.makeUniqueEntityName(desiredName);
-                }
-
-                const std::string oldName = selectedEntity->name;
-                if (m_activeScene.renameEntity(oldName, appliedName)) {
-                    appendTerminalLine("Renamed entity " + oldName + " to " + appliedName + ".");
-                    m_activeScene.setGameStateValue("SelectedEntity", appliedName);
-                    std::fill(m_selectedEntityNameBuffer.begin(), m_selectedEntityNameBuffer.end(), '\0');
-                    std::snprintf(m_selectedEntityNameBuffer.data(), m_selectedEntityNameBuffer.size(), "%s", appliedName.c_str());
-                }
-            }
-        }
-
-        const auto& refreshedEntities = m_activeScene.getEntityData();
-        if (m_selectedEntityIndex < 0 || m_selectedEntityIndex >= static_cast<int>(refreshedEntities.size())) {
-            clearEntitySelection();
-            ImGui::End();
-            return;
-        }
-
-        selectedEntity = m_activeScene.getEntityByIndex(static_cast<std::size_t>(m_selectedEntityIndex));
-        if (selectedEntity == nullptr) {
-            ImGui::End();
-            return;
-        }
-
-        int childCount = 0;
-        for (const SceneEntity& entity : refreshedEntities) {
-            if (entity.parentIndex == m_selectedEntityIndex) {
-                ++childCount;
-            }
-        }
-
-        int hierarchyDepth = 0;
-        int currentParent = selectedEntity->parentIndex;
-        while (currentParent >= 0 && currentParent < static_cast<int>(refreshedEntities.size())) {
-            ++hierarchyDepth;
-            currentParent = refreshedEntities[static_cast<std::size_t>(currentParent)].parentIndex;
-        }
-
-        ImGui::Text("Attributes");
-        ImGui::BulletText("Entity ID: %d", m_selectedEntityIndex);
-        ImGui::BulletText("Category: %s", getEntityCategoryToken(*selectedEntity));
-        ImGui::BulletText("Hierarchy Depth: %d", hierarchyDepth);
-        ImGui::BulletText("Child Count: %d", childCount);
-        ImGui::BulletText("Root Entity: %s", selectedEntity->parentIndex < 0 ? "Yes" : "No");
-
-        if (selectedEntity->parentIndex >= 0 && selectedEntity->parentIndex < static_cast<int>(refreshedEntities.size())) {
-            ImGui::BulletText("Parent Entity: %s", refreshedEntities[static_cast<std::size_t>(selectedEntity->parentIndex)].name.c_str());
-        } else {
-            ImGui::BulletText("Parent Entity: None");
-        }
-
-        ImGui::Spacing();
-        ImGui::Separator();
-
-        const int currentParentIndex = selectedEntity->parentIndex;
-        const char* parentPreview = "None";
-        if (currentParentIndex >= 0 && currentParentIndex < static_cast<int>(refreshedEntities.size())) {
-            parentPreview = refreshedEntities[static_cast<std::size_t>(currentParentIndex)].name.c_str();
-        }
-
-        if (ImGui::BeginCombo("Parent", parentPreview)) {
-            const bool noParentSelected = currentParentIndex < 0;
-            if (ImGui::Selectable("None", noParentSelected)) {
-                if (m_activeScene.setEntityParent(static_cast<std::size_t>(m_selectedEntityIndex), std::nullopt)) {
-                    appendTerminalLine("Parent cleared for " + selectedEntity->name + ".");
-                }
-            }
-
-            for (std::size_t i = 0; i < refreshedEntities.size(); ++i) {
-                if (static_cast<int>(i) == m_selectedEntityIndex) {
-                    continue;
-                }
-
-                const bool isSelected = currentParentIndex == static_cast<int>(i);
-                if (ImGui::Selectable(refreshedEntities[i].name.c_str(), isSelected)) {
-                    if (m_activeScene.setEntityParent(static_cast<std::size_t>(m_selectedEntityIndex), i)) {
-                        appendTerminalLine("Parent of " + selectedEntity->name + " set to " + refreshedEntities[i].name + ".");
-                    } else {
-                        appendTerminalLine("Parent assignment rejected for " + selectedEntity->name + " (cycle or invalid relationship).");
-                    }
-                }
-
-                if (isSelected) {
-                    ImGui::SetItemDefaultFocus();
-                }
-            }
-            ImGui::EndCombo();
-        }
-
-        ImGui::Spacing();
-        ImGui::Separator();
-        ImGui::Text("Transform");
-
-        bool transformChanged = false;
-        transformChanged |= ImGui::DragFloat3("Position", &selectedEntity->transform.position.x, 0.05f);
-        transformChanged |= ImGui::DragFloat3("Rotation", &selectedEntity->transform.rotation.x, 0.4f);
-        transformChanged |= ImGui::DragFloat3("Scale", &selectedEntity->transform.scale.x, 0.02f, 0.01f, 500.0f);
-        transformChanged |= ImGui::DragFloat3("Size", &selectedEntity->transform.size.x, 0.02f, 0.01f, 500.0f);
-
-        selectedEntity->transform.scale.x = std::max(0.01f, selectedEntity->transform.scale.x);
-        selectedEntity->transform.scale.y = std::max(0.01f, selectedEntity->transform.scale.y);
-        selectedEntity->transform.scale.z = std::max(0.01f, selectedEntity->transform.scale.z);
-        selectedEntity->transform.size.x = std::max(0.01f, selectedEntity->transform.size.x);
-        selectedEntity->transform.size.y = std::max(0.01f, selectedEntity->transform.size.y);
-        selectedEntity->transform.size.z = std::max(0.01f, selectedEntity->transform.size.z);
-
-        if (transformChanged) {
-            setSelectedEntity(m_selectedEntityIndex);
-        }
-
-        if (ImGui::Button("Reset Transform")) {
-            selectedEntity->transform.position = glm::vec3(0.0f, 0.0f, 0.0f);
-            selectedEntity->transform.rotation = glm::vec3(0.0f, 0.0f, 0.0f);
-            selectedEntity->transform.scale = glm::vec3(1.0f, 1.0f, 1.0f);
-            selectedEntity->transform.size = glm::vec3(1.0f, 1.0f, 1.0f);
-            appendTerminalLine("Transform reset for " + selectedEntity->name + ".");
-        }
-
-        ImGui::End();
-    }
-
-    void UILayer::drawSettingsPanel() {
-        if (!ImGui::Begin("Settings", &m_showSettingsPanel)) {
-            ImGui::End();
-            return;
-        }
-
-        ImGui::Text("Engine Configuration");
-        ImGui::Separator();
-        drawEngineSettingsSection();
-
-        ImGui::Spacing();
-        ImGui::Separator();
-        if (ImGui::Button("Close Settings")) {
-            m_showSettingsPanel = false;
-        }
-
-        ImGui::End();
-    }
-
-    void UILayer::drawDebugPanel() {
-        if (!ImGui::Begin("Debug", &m_showDebugPanel)) {
-            ImGui::End();
-            return;
-        }
-
-        const float frameMs = m_lastFrameDeltaTimeSeconds * 1000.0f;
-        const float fps = m_lastFrameDeltaTimeSeconds > 0.0f ? (1.0f / m_lastFrameDeltaTimeSeconds) : 0.0f;
-        const auto& entities = m_activeScene.getEntityData();
-
-        ImGui::Text("Runtime");
-        ImGui::Separator();
-        ImGui::BulletText("Frame: %.2f ms", frameMs);
-        ImGui::BulletText("FPS: %.1f", fps);
-        ImGui::BulletText("Scene State: %s", sceneStateToString(m_activeScene.getState()));
-        ImGui::BulletText("Entities: %d", static_cast<int>(entities.size()));
-        ImGui::BulletText("Assets: %d", static_cast<int>(m_activeScene.getAssets().size()));
-        ImGui::BulletText("Viewport: %dx%d", Renderer::getViewportWidth(), Renderer::getViewportHeight());
-        ImGui::BulletText("Frame Texture ID: %u", Renderer::getFrameTextureID());
-
-        ImGui::Spacing();
-        ImGui::Text("Selection");
-        ImGui::Separator();
-        if (m_selectedEntityIndex >= 0 && m_selectedEntityIndex < static_cast<int>(entities.size())) {
-            const SceneEntity& selectedEntity = entities[static_cast<std::size_t>(m_selectedEntityIndex)];
-            ImGui::BulletText("Index: %d", m_selectedEntityIndex);
-            ImGui::BulletText("Name: %s", selectedEntity.name.c_str());
-            ImGui::BulletText("Parent Index: %d", selectedEntity.parentIndex);
-            ImGui::BulletText("Position: %.2f %.2f %.2f", selectedEntity.transform.position.x, selectedEntity.transform.position.y, selectedEntity.transform.position.z);
-        } else {
-            ImGui::TextDisabled("No selected entity.");
-        }
-
-        ImGui::Spacing();
-        ImGui::Text("AssetLoader");
-        ImGui::Separator();
-        ImGui::BulletText("Texture2D: %d", static_cast<int>(AssetLoader::getTexture2DNames().size()));
-        ImGui::BulletText("Texture3D: %d", static_cast<int>(AssetLoader::getTexture3DNames().size()));
-        ImGui::BulletText("Shaders: %d", static_cast<int>(AssetLoader::getShaderNames().size()));
-        ImGui::BulletText("Compute Shaders: %d", static_cast<int>(AssetLoader::getComputeShaderNames().size()));
-        ImGui::BulletText("Models: %d", static_cast<int>(AssetLoader::getModelNames().size()));
-        ImGui::BulletText("Log Lines: %d", static_cast<int>(m_terminalLines.size()));
-
-        ImGui::End();
-    }
-
-    void UILayer::drawBottomPanel() {
-        if (!ImGui::Begin("Asset Browser", &m_showBottomPanel)) {
-            ImGui::End();
-            return;
-        }
-
-        ImGui::Text("Asset Viewer / Loader");
-        ImGui::Separator();
-        drawAssetsPanel();
-
-        ImGui::End();
-    }
-
-    void UILayer::drawAssetsPanel() {
-        constexpr float kFixedAssetIconSize = 72.0f;
-
-        ImGui::Text("Runtime Import");
-        if (ImGui::Button("Import Asset...")) {
-            loadRuntimeAssetAuto();
-        }
-
-        ImGui::SameLine();
-        ImGui::SetNextItemWidth(110.0f);
-        if (ImGui::InputInt("3D Depth Hint", &m_runtimeTexture3DDepth, 1, 8)) {
-            m_runtimeTexture3DDepth = std::max(1, m_runtimeTexture3DDepth);
-        }
-        ImGui::TextDisabled("Auto import routes texture/model/shader/compute files through AssetLoader.");
-
-        ImGui::Spacing();
-        ImGui::Separator();
-        ImGui::Text("Asset Viewer");
-
-        std::set<std::string> folderNames;
-        folderNames.insert("All");
-        const auto& assets = m_activeScene.getAssets();
-        for (const SceneAsset& asset : assets) {
-            folderNames.insert(extractAssetFolderName(asset));
-        }
-
-        if (ImGui::BeginChild("AssetFolderFilterStrip", ImVec2(0.0f, 38.0f), true, ImGuiWindowFlags_HorizontalScrollbar)) {
-            for (const std::string& folderName : folderNames) {
-                const bool isSelectedFolder = m_assetBrowserFolderFilter == folderName;
-                if (isSelectedFolder) {
-                    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.20f, 0.32f, 0.52f, 1.0f));
-                    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.24f, 0.38f, 0.60f, 1.0f));
-                    ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.28f, 0.44f, 0.68f, 1.0f));
-                }
-
-                const std::string folderButtonLabel = "DIR " + folderName + "##asset_folder_" + folderName;
-                if (ImGui::Button(folderButtonLabel.c_str())) {
-                    m_assetBrowserFolderFilter = folderName;
-                }
-
-                if (isSelectedFolder) {
-                    ImGui::PopStyleColor(3);
-                }
-
-                ImGui::SameLine();
-            }
-        }
-        ImGui::EndChild();
-
-        ImGui::Text("Icon Size: %.0f px (fixed)", kFixedAssetIconSize);
-        ImGui::SameLine();
-        ImGui::Text("Total: %d", static_cast<int>(assets.size()));
-
-        std::vector<std::size_t> filteredAssetIndices;
-        filteredAssetIndices.reserve(assets.size());
-        for (std::size_t i = 0; i < assets.size(); ++i) {
-            if (m_assetBrowserFolderFilter == "All" || extractAssetFolderName(assets[i]) == m_assetBrowserFolderFilter) {
-                filteredAssetIndices.push_back(i);
-            }
-        }
-
-        if (m_selectedAssetIndex >= static_cast<int>(assets.size())) {
-            m_selectedAssetIndex = -1;
-        }
-
-        if (filteredAssetIndices.empty()) {
-            ImGui::TextDisabled("No assets in selected folder.");
-        } else {
-            const float cellWidth = kFixedAssetIconSize + 30.0f;
-            const int columns = std::max(1, static_cast<int>(std::max(1.0f, ImGui::GetContentRegionAvail().x) / cellWidth));
-
-            if (ImGui::BeginTable("AssetIconGrid", columns, ImGuiTableFlags_SizingStretchSame)) {
-                for (std::size_t assetIndex : filteredAssetIndices) {
-                    ImGui::TableNextColumn();
-                    ImGui::PushID(static_cast<int>(assetIndex));
-
-                    const SceneAsset& asset = assets[assetIndex];
-                    ImVec4 assetColor = getAssetIconColor(asset);
-                    if (m_selectedAssetIndex == static_cast<int>(assetIndex)) {
-                        assetColor = brightenColor(assetColor, 0.12f);
-                    }
-
-                    ImGui::PushStyleColor(ImGuiCol_Button, assetColor);
-                    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, brightenColor(assetColor, 0.08f));
-                    ImGui::PushStyleColor(ImGuiCol_ButtonActive, brightenColor(assetColor, 0.14f));
-
-                    const std::string iconLabel = std::string(getAssetIconToken(asset)) + "##asset_icon";
-                    if (ImGui::Button(iconLabel.c_str(), ImVec2(kFixedAssetIconSize, kFixedAssetIconSize))) {
-                        m_selectedAssetIndex = static_cast<int>(assetIndex);
-                    }
-
-                    const bool iconHovered = ImGui::IsItemHovered();
-                    ImGui::PopStyleColor(3);
-
-                    if (iconHovered) {
-                        ImGui::BeginTooltip();
-                        ImGui::Text("%s", asset.name.c_str());
-                        ImGui::TextDisabled("%s", asset.path.c_str());
-                        ImGui::EndTooltip();
-                    }
-
-                    ImGui::TextWrapped("%s", asset.name.c_str());
-                    ImGui::PopID();
-                }
-
-                ImGui::EndTable();
-            }
-        }
-
-        if (m_selectedAssetIndex >= 0 && m_selectedAssetIndex < static_cast<int>(assets.size())) {
-            const SceneAsset& selectedAsset = assets[static_cast<std::size_t>(m_selectedAssetIndex)];
-            ImGui::Spacing();
-            ImGui::Separator();
-            ImGui::Text("Selected Asset");
-            ImGui::BulletText("Name: %s", selectedAsset.name.c_str());
-            ImGui::BulletText("Folder: %s", extractAssetFolderName(selectedAsset).c_str());
-            ImGui::TextWrapped("Path: %s", selectedAsset.path.c_str());
-
-            if (ImGui::Button("Remove From Scene Asset List")) {
-                if (m_activeScene.removeAsset(selectedAsset.name)) {
-                    appendTerminalLine("Removed scene asset entry: " + selectedAsset.name + ".");
-                    m_selectedAssetIndex = -1;
-                }
-            }
-        }
-    }
-
-    void UILayer::drawTerminalPanel() {
-        if (ImGui::Button("Clear")) {
-            m_terminalLines.clear();
-        }
-
-        ImGui::SameLine();
-        if (ImGui::Button("Copy")) {
-            std::string fullLog;
-            for (const std::string& line : m_terminalLines) {
-                fullLog += line;
-                fullLog += '\n';
-            }
-            ImGui::SetClipboardText(fullLog.c_str());
-            appendTerminalLine("Terminal log copied to clipboard.");
-        }
-
-        ImGui::SameLine();
-        ImGui::Checkbox("Auto-scroll", &m_autoScrollTerminal);
-        ImGui::Separator();
-
-        ImGui::BeginChild("TerminalLogRegion", ImVec2(0.0f, 0.0f), false, ImGuiWindowFlags_HorizontalScrollbar);
-        for (const std::string& line : m_terminalLines) {
-            ImGui::TextUnformatted(line.c_str());
-        }
-
-        if (m_autoScrollTerminal && m_scrollTerminalToBottom) {
-            ImGui::SetScrollHereY(1.0f);
-        }
-
-        m_scrollTerminalToBottom = false;
-        ImGui::EndChild();
     }
 
     void UILayer::drawEngineSettingsSection() {
@@ -2099,3 +1779,6 @@ namespace Valkron {
     }
 
 }
+
+
+

@@ -36,6 +36,12 @@ namespace Valkron {
         bool primary = false;
     };
 
+    enum class SceneEntityType {
+        Generic,
+        Camera,
+        Light
+    };
+
     struct VALKRON_API SceneTransform {
         glm::vec3 position{0.0f, 0.0f, 0.0f};
         glm::vec3 rotation{0.0f, 0.0f, 0.0f};
@@ -47,6 +53,8 @@ namespace Valkron {
         std::string name;
         SceneTransform transform{};
         int parentIndex = -1;
+        SceneEntityType type = SceneEntityType::Generic;
+        std::string modelAssetName;
     };
 
     class VALKRON_API Scene {
@@ -59,7 +67,7 @@ namespace Valkron {
             SceneState getState() const;
             void setState(SceneState state);
 
-            void addEntity(std::string entityName);
+            void addEntity(std::string entityName, SceneEntityType type = SceneEntityType::Generic);
             bool renameEntity(const std::string& oldName, std::string newName);
             bool removeEntity(const std::string& entityName);
             const std::vector<std::string>& getEntities() const;

@@ -27,9 +27,9 @@ namespace Valkron {
         m_state = state;
     }
 
-    void Scene::addEntity(std::string entityName) {
+    void Scene::addEntity(std::string entityName, SceneEntityType type) {
         const std::string uniqueName = makeUniqueEntityName(entityName);
-        m_entities.push_back(SceneEntity{uniqueName, SceneTransform{}, -1});
+        m_entities.push_back(SceneEntity{uniqueName, SceneTransform{}, -1, type});
         m_entityNameCacheDirty = true;
     }
 
