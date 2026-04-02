@@ -3,6 +3,7 @@
 #include "Core/Core.hpp"
 #include "Event/Event.hpp"
 #include "Application/Layer.hpp"
+#include "Application/UI/RuntimeAssetImportService.hpp"
 #include "Application/UI/Panels/EditorPanel.hpp"
 #include "Engine/EngineConfig.hpp"
 #include "Engine/Scene.hpp"
@@ -10,6 +11,7 @@
 #include "glm/vec3.hpp"
 
 #include <array>
+#include <filesystem>
 #include <memory>
 #include <string>
 #include <vector>
@@ -37,10 +39,15 @@ namespace Valkron {
 
         private:
             void appendTerminalLine(const std::string& line);
+            void openAssetImportBrowser(RuntimeImportMode mode, const char* title);
+            void drawAssetImportFileBrowser();
+            bool importRuntimeAssetFromPath(const std::string& assetPath, RuntimeImportMode mode);
+            bool isAssetPathAllowedForMode(const std::filesystem::path& path, RuntimeImportMode mode) const;
             void drawTopNavbar();
             void drawDockspaceHost();
             void drawSceneHierarchyPanel();
             void drawSceneViewPanel(float deltaTime);
+            void drawGameViewPanel(float deltaTime);
             void drawInspectorPanel();
             void drawSettingsPanel();
             void drawDebugPanel();
@@ -82,6 +89,7 @@ namespace Valkron {
 
             bool m_showSceneHierarchyPanel = true;
             bool m_showSceneViewPanel = true;
+            bool m_showGameViewPanel = true;
             bool m_showInspectorPanel = true;
             bool m_showSettingsPanel = false;
             bool m_showDebugPanel = false;
@@ -120,6 +128,7 @@ namespace Valkron {
             std::unique_ptr<EditorPanel> m_dockspacePanelController = nullptr;
             std::unique_ptr<EditorPanel> m_sceneHierarchyPanelController = nullptr;
             std::unique_ptr<EditorPanel> m_sceneViewPanelController = nullptr;
+            std::unique_ptr<EditorPanel> m_gameViewPanelController = nullptr;
             std::unique_ptr<EditorPanel> m_inspectorPanelController = nullptr;
             std::unique_ptr<EditorPanel> m_settingsPanelController = nullptr;
             std::unique_ptr<EditorPanel> m_debugPanelController = nullptr;
@@ -136,6 +145,13 @@ namespace Valkron {
 
             std::string m_assetBrowserFolderFilter;
             int m_selectedAssetIndex = -1;
+
+            bool m_assetImportBrowserOpen = false;
+            bool m_assetImportBrowserRequestOpen = false;
+            RuntimeImportMode m_assetImportMode = RuntimeImportMode::Auto;
+            std::string m_assetImportDialogTitle;
+            std::filesystem::path m_assetImportCurrentDirectory;
+            std::filesystem::path m_assetImportSelectedPath;
 
             int m_runtimeTexture3DDepth = 8;
     };

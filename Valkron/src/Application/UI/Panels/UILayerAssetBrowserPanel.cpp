@@ -3,16 +3,28 @@
 namespace Valkron {
 
     void UILayer::drawBottomPanel() {
-        if (!ImGui::Begin("Asset Browser", &m_showBottomPanel)) {
+        if (!ImGui::Begin("Project", &m_showBottomPanel)) {
             ImGui::End();
             return;
         }
 
         drawWindowPanelGradient();
 
-        ImGui::Text("Asset Viewer / Loader");
-        ImGui::Separator();
-        drawAssetsPanel();
+        if (ImGui::BeginTabBar("ProjectTabs", ImGuiTabBarFlags_None)) {
+            if (ImGui::BeginTabItem("Project")) {
+                ImGui::Text("Asset Viewer / Loader");
+                ImGui::Separator();
+                drawAssetsPanel();
+                ImGui::EndTabItem();
+            }
+
+            if (ImGui::BeginTabItem("Console")) {
+                drawTerminalPanel();
+                ImGui::EndTabItem();
+            }
+
+            ImGui::EndTabBar();
+        }
 
         ImGui::End();
     }

@@ -46,17 +46,19 @@ namespace Valkron {
         if (ImGui::BeginMenu("Window")) {
             ImGui::MenuItem("Scene Hierarchy", nullptr, &m_showSceneHierarchyPanel);
             ImGui::MenuItem("Scene View", nullptr, &m_showSceneViewPanel);
+            ImGui::MenuItem("Game View", nullptr, &m_showGameViewPanel);
             ImGui::MenuItem("Inspector", nullptr, &m_showInspectorPanel);
-            ImGui::MenuItem("Asset Browser", nullptr, &m_showBottomPanel);
-            ImGui::MenuItem("Debug Panel", nullptr, &m_showDebugPanel);
+            ImGui::MenuItem("Project", nullptr, &m_showBottomPanel);
+            ImGui::MenuItem("Performance", nullptr, &m_showDebugPanel);
             ImGui::Separator();
             if (ImGui::MenuItem("Reset Layout")) {
                 m_showSceneHierarchyPanel = true;
                 m_showSceneViewPanel = true;
+                m_showGameViewPanel = true;
                 m_showInspectorPanel = true;
                 m_showSettingsPanel = false;
                 m_showBottomPanel = true;
-                m_showDebugPanel = false;
+                m_showDebugPanel = true;
                 m_resetLayoutRequested = true;
                 appendTerminalLine("Editor layout reset to default window arrangement.");
             }

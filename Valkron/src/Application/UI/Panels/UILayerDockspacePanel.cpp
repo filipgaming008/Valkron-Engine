@@ -19,14 +19,21 @@ namespace Valkron {
             ImGui::DockBuilderSetNodeSize(dockspaceID, viewport->WorkSize);
 
             ImGuiID dockMain = dockspaceID;
-            const ImGuiID dockLeft = ImGui::DockBuilderSplitNode(dockMain, ImGuiDir_Left, 0.20f, nullptr, &dockMain);
+            const ImGuiID dockLeft = ImGui::DockBuilderSplitNode(dockMain, ImGuiDir_Left, 0.18f, nullptr, &dockMain);
             const ImGuiID dockRight = ImGui::DockBuilderSplitNode(dockMain, ImGuiDir_Right, 0.24f, nullptr, &dockMain);
-            const ImGuiID dockBottom = ImGui::DockBuilderSplitNode(dockMain, ImGuiDir_Down, 0.30f, nullptr, &dockMain);
+            const ImGuiID dockBottom = ImGui::DockBuilderSplitNode(dockMain, ImGuiDir_Down, 0.34f, nullptr, &dockMain);
+
+            ImGuiID dockTopCenter = dockMain;
+            const ImGuiID dockGame = ImGui::DockBuilderSplitNode(dockTopCenter, ImGuiDir_Right, 0.58f, nullptr, &dockTopCenter);
+            ImGuiID dockBottomMain = dockBottom;
+            const ImGuiID dockBottomRight = ImGui::DockBuilderSplitNode(dockBottomMain, ImGuiDir_Right, 0.38f, nullptr, &dockBottomMain);
 
             ImGui::DockBuilderDockWindow("Scene Hierarchy", dockLeft);
-            ImGui::DockBuilderDockWindow("Scene View", dockMain);
+            ImGui::DockBuilderDockWindow("Scene View", dockTopCenter);
+            ImGui::DockBuilderDockWindow("Game View", dockGame);
             ImGui::DockBuilderDockWindow("Inspector", dockRight);
-            ImGui::DockBuilderDockWindow("Asset Browser", dockBottom);
+            ImGui::DockBuilderDockWindow("Project", dockBottomMain);
+            ImGui::DockBuilderDockWindow("Performance", dockBottomRight);
 
             ImGui::DockBuilderFinish(dockspaceID);
         }

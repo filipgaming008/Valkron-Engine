@@ -20,3 +20,6 @@
 [submodule "Valkron/vendor/imguizmo"]
 	path = Valkron/vendor/imguizmo
 	url = https://github.com/cedricguillemet/imguizmo
+[submodule "Valkron/vendor/imviewguizmo"]
+	path = Valkron/vendor/imviewguizmo
+	url = https://github.com/Ka1serM/ImViewGuizmo

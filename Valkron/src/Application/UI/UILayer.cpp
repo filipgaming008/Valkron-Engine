@@ -1,14 +1,9 @@
 ﻿#include "Application/UI/UILayer.hpp"
 
-#if defined(_WIN32)
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif
-#include <windows.h>
-#include <commdlg.h>
-#endif
-
+#include "Application/UI/RuntimeAssetImportService.hpp"
+#include "Core/FileSystem.hpp"
 #include "Core/Log.hpp"
+#include "Engine/AssetManager.hpp"
 #include "Engine/AssetLoader.hpp"
 #include "Event/Event.hpp"
 #include "Renderer/Model.hpp"
@@ -70,49 +65,6 @@ namespace Valkron {
         }
     }
 
-    std::string openFileDialogNative(const char* dialogTitle, const char* filterSpec) {
-#if defined(_WIN32)
-        char selectedPath[MAX_PATH] = {};
-        OPENFILENAMEA dialog = {};
-        dialog.lStructSize = sizeof(dialog);
-        dialog.hwndOwner = nullptr;
-        dialog.lpstrFile = selectedPath;
-        dialog.nMaxFile = MAX_PATH;
-        dialog.lpstrFilter = filterSpec;
-        dialog.nFilterIndex = 1;
-        dialog.Flags = OFN_PATHMUSTEXIST | OFN_FILEMUSTEXIST | OFN_NOCHANGEDIR;
-        dialog.lpstrTitle = dialogTitle;
-
-        if (GetOpenFileNameA(&dialog) != 0) {
-            return std::string(selectedPath);
-        }
-#endif
-        (void)dialogTitle;
-        (void)filterSpec;
-        return {};
-    }
-
-    std::string makeUniqueAssetName(std::string baseName, const std::vector<std::string>& existingNames) {
-        if (baseName.empty()) {
-            baseName = "Asset";
-        }
-
-        std::unordered_set<std::string> existingSet(existingNames.begin(), existingNames.end());
-        if (existingSet.find(baseName) == existingSet.end()) {
-            return baseName;
-        }
-
-        int suffix = 1;
-        for (;;) {
-            const std::string candidate = baseName + "_" + std::to_string(suffix);
-            if (existingSet.find(candidate) == existingSet.end()) {
-                return candidate;
-            }
-
-            ++suffix;
-        }
-    }
-
     glm::vec3 computeOrbitOffset(float distance, float yawRadians, float pitchRadians) {
         const float cosPitch = glm::cos(pitchRadians);
         return glm::vec3(
@@ -120,69 +72,6 @@ namespace Valkron {
             distance * glm::sin(pitchRadians),
             distance * cosPitch * glm::cos(yawRadians)
         );
-    }
-
-    std::string deriveAssetBaseName(const std::string& absoluteOrRelativePath, const std::string& fallbackName) {
-        const std::filesystem::path filePath(absoluteOrRelativePath);
-        const std::string stem = filePath.stem().string();
-        return stem.empty() ? fallbackName : stem;
-    }
-
-    std::vector<std::string> collectAllRuntimeAssetNames() {
-        std::vector<std::string> names;
-
-        auto appendNames = [&names](const std::vector<std::string>& sourceNames) {
-            names.insert(names.end(), sourceNames.begin(), sourceNames.end());
-        };
-
-        appendNames(AssetLoader::getTexture2DNames());
-        appendNames(AssetLoader::getTexture3DNames());
-        appendNames(AssetLoader::getShaderNames());
-        appendNames(AssetLoader::getComputeShaderNames());
-        appendNames(AssetLoader::getModelNames());
-        return names;
-    }
-
-    std::string normalizePathKey(const std::string& pathValue) {
-        std::string normalized = std::filesystem::path(pathValue).lexically_normal().generic_string();
-        std::transform(normalized.begin(), normalized.end(), normalized.begin(), [](unsigned char ch) {
-            return static_cast<char>(std::tolower(ch));
-        });
-        return normalized;
-    }
-
-    int registerImportedModelMaterialTextures(Scene& scene, const std::string& modelName) {
-        const std::shared_ptr<Model> model = AssetLoader::getModel(modelName);
-        if (model == nullptr || !model->isLoaded()) {
-            return 0;
-        }
-
-        std::vector<std::string> existingNames = collectAllRuntimeAssetNames();
-        std::unordered_set<std::string> existingPathKeys;
-        for (const SceneAsset& existingAsset : scene.getAssets()) {
-            existingPathKeys.insert(normalizePathKey(existingAsset.path));
-            existingNames.push_back(existingAsset.name);
-        }
-
-        int importedTextureCount = 0;
-        for (const std::string& texturePath : model->getReferencedTexturePaths()) {
-            const std::string pathKey = normalizePathKey(texturePath);
-            if (existingPathKeys.find(pathKey) != existingPathKeys.end()) {
-                continue;
-            }
-
-            const std::string textureName = makeUniqueAssetName(deriveAssetBaseName(texturePath, modelName + "_Texture"), existingNames);
-            if (!AssetLoader::loadTexture2D(textureName, texturePath)) {
-                continue;
-            }
-
-            scene.addAsset(textureName, texturePath);
-            existingNames.push_back(textureName);
-            existingPathKeys.insert(pathKey);
-            ++importedTextureCount;
-        }
-
-        return importedTextureCount;
     }
 
     std::string toLowercase(std::string value) {
@@ -759,12 +648,12 @@ namespace Valkron {
         drawList->AddRectFilledMultiColor(
             windowPos,
             windowMax,
-            IM_COL32(23, 28, 41, 135),
-            IM_COL32(23, 28, 41, 135),
-            IM_COL32(12, 15, 24, 170),
-            IM_COL32(12, 15, 24, 170)
+            IM_COL32(28, 30, 32, 150),
+            IM_COL32(28, 30, 32, 150),
+            IM_COL32(17, 18, 20, 185),
+            IM_COL32(17, 18, 20, 185)
         );
-        drawList->AddRect(windowPos, windowMax, IM_COL32(54, 63, 84, 170), 0.0f, 0, 1.0f);
+        drawList->AddRect(windowPos, windowMax, IM_COL32(142, 38, 38, 140), 0.0f, 0, 1.0f);
     }
 
     void drawHorizontalSceneGrid(
@@ -929,103 +818,6 @@ namespace Valkron {
         return std::nullopt;
     }
 
-    bool isTextureImageExtension(const std::string& extension) {
-        return extension == ".png" || extension == ".jpg" || extension == ".jpeg" || extension == ".bmp" || extension == ".tga" || extension == ".ppm";
-    }
-
-    bool isModelAssetExtension(const std::string& extension) {
-        return extension == ".obj" || extension == ".fbx" || extension == ".gltf" || extension == ".glb" || extension == ".dae" || extension == ".3ds";
-    }
-
-    bool isComputeShaderExtension(const std::string& extension) {
-        return extension == ".comp";
-    }
-
-    bool isVertexShaderExtension(const std::string& extension) {
-        return extension == ".vert" || extension == ".vs";
-    }
-
-    bool isFragmentShaderExtension(const std::string& extension) {
-        return extension == ".frag" || extension == ".fs";
-    }
-
-    std::optional<std::pair<std::string, std::string>> resolveShaderPair(const std::filesystem::path& selectedPath) {
-        const std::filesystem::path parent = selectedPath.parent_path();
-        const std::string stem = selectedPath.stem().string();
-        const std::string lowerStem = toLowercase(stem);
-
-        std::vector<std::string> candidateStems;
-        candidateStems.push_back(stem);
-
-        auto addStemCandidate = [&candidateStems](const std::string& value) {
-            if (value.empty()) {
-                return;
-            }
-
-            if (std::find(candidateStems.begin(), candidateStems.end(), value) == candidateStems.end()) {
-                candidateStems.push_back(value);
-            }
-        };
-
-        if (lowerStem.ends_with("_vert") && stem.size() > 5) {
-            addStemCandidate(stem.substr(0, stem.size() - 5));
-        }
-        if (lowerStem.ends_with("_frag") && stem.size() > 5) {
-            addStemCandidate(stem.substr(0, stem.size() - 5));
-        }
-        if (lowerStem.ends_with("_vs") && stem.size() > 3) {
-            addStemCandidate(stem.substr(0, stem.size() - 3));
-        }
-        if (lowerStem.ends_with("_fs") && stem.size() > 3) {
-            addStemCandidate(stem.substr(0, stem.size() - 3));
-        }
-
-        for (const std::string& candidateStem : candidateStems) {
-            const std::filesystem::path vertexPath = parent / (candidateStem + ".vert");
-            const std::filesystem::path fragmentPath = parent / (candidateStem + ".frag");
-            if (std::filesystem::exists(vertexPath) && std::filesystem::exists(fragmentPath)) {
-                return std::make_pair(vertexPath.string(), fragmentPath.string());
-            }
-
-            const std::filesystem::path vertexPathShort = parent / (candidateStem + ".vs");
-            const std::filesystem::path fragmentPathShort = parent / (candidateStem + ".fs");
-            if (std::filesystem::exists(vertexPathShort) && std::filesystem::exists(fragmentPathShort)) {
-                return std::make_pair(vertexPathShort.string(), fragmentPathShort.string());
-            }
-        }
-
-        const std::string selectedExtension = toLowercase(selectedPath.extension().string());
-        if (isVertexShaderExtension(selectedExtension)) {
-            for (const std::string fragmentExtension : {".frag", ".fs"}) {
-                std::filesystem::path fragmentPath = selectedPath;
-                fragmentPath.replace_extension(fragmentExtension);
-                if (std::filesystem::exists(fragmentPath)) {
-                    return std::make_pair(selectedPath.string(), fragmentPath.string());
-                }
-            }
-        }
-
-        if (isFragmentShaderExtension(selectedExtension)) {
-            for (const std::string vertexExtension : {".vert", ".vs"}) {
-                std::filesystem::path vertexPath = selectedPath;
-                vertexPath.replace_extension(vertexExtension);
-                if (std::filesystem::exists(vertexPath)) {
-                    return std::make_pair(vertexPath.string(), selectedPath.string());
-                }
-            }
-        }
-
-        return std::nullopt;
-    }
-
-    const char kImageFileFilter[] = "Image Files\0*.png;*.jpg;*.jpeg;*.bmp;*.tga;*.ppm\0All Files\0*.*\0\0";
-    const char kAllRuntimeAssetFilter[] = "Supported Assets\0*.png;*.jpg;*.jpeg;*.bmp;*.tga;*.ppm;*.vert;*.vs;*.frag;*.fs;*.comp;*.obj;*.fbx;*.gltf;*.glb;*.dae;*.3ds\0All Files\0*.*\0\0";
-    const char kVertexShaderFilter[] = "Vertex Shaders\0*.vert;*.vs;*.glsl\0All Files\0*.*\0\0";
-    const char kFragmentShaderFilter[] = "Fragment Shaders\0*.frag;*.fs;*.glsl\0All Files\0*.*\0\0";
-    const char kComputeShaderFilter[] = "Compute Shaders\0*.comp;*.glsl\0All Files\0*.*\0\0";
-    const char kModelFileFilter[] = "Model Files\0*.obj;*.fbx;*.gltf;*.glb;*.dae;*.3ds\0All Files\0*.*\0\0";
-    const char kModelAssetDragPayloadType[] = "AssetBrowser.ModelAssetName";
-
     void UILayer::bindEngineSettings(Window* window, EngineConfig* engineConfig) {
         m_window = window;
         m_engineConfig = engineConfig;
@@ -1048,6 +840,147 @@ namespace Valkron {
         m_selectedEntityIndex = -1;
         m_selectedEntityNameBufferEntityIndex = -1;
         m_activeScene.setGameStateValue("SelectedEntity", "None");
+    }
+
+    void UILayer::openAssetImportBrowser(RuntimeImportMode mode, const char* title) {
+        m_assetImportMode = mode;
+        m_assetImportDialogTitle = title != nullptr ? title : "Import Asset";
+        m_assetImportSelectedPath.clear();
+
+        std::error_code ec;
+        const std::filesystem::path defaultDir = FileSystem::getAssetRootDirectory();
+        if (!defaultDir.empty() && std::filesystem::exists(defaultDir, ec)) {
+            m_assetImportCurrentDirectory = defaultDir;
+        } else {
+            m_assetImportCurrentDirectory = std::filesystem::current_path(ec);
+        }
+
+        m_assetImportBrowserOpen = true;
+        m_assetImportBrowserRequestOpen = true;
+    }
+
+    bool UILayer::isAssetPathAllowedForMode(const std::filesystem::path& path, RuntimeImportMode mode) const {
+        return RuntimeAssetImportService::isPathAllowedForMode(path, mode);
+    }
+
+    void UILayer::drawAssetImportFileBrowser() {
+        if (!m_assetImportBrowserOpen) {
+            return;
+        }
+
+        VALKRON_CORE_ASSERT(!m_assetImportDialogTitle.empty(), "Asset import dialog title must not be empty");
+
+        if (m_assetImportBrowserRequestOpen) {
+            ImGui::OpenPopup(m_assetImportDialogTitle.c_str());
+            m_assetImportBrowserRequestOpen = false;
+        }
+
+        bool keepOpen = m_assetImportBrowserOpen;
+        ImGui::SetNextWindowSize(ImVec2(760.0f, 460.0f), ImGuiCond_FirstUseEver);
+        if (!ImGui::BeginPopupModal(m_assetImportDialogTitle.c_str(), &keepOpen, ImGuiWindowFlags_NoCollapse)) {
+            m_assetImportBrowserOpen = keepOpen;
+            return;
+        }
+
+        std::error_code ec;
+        if (m_assetImportCurrentDirectory.empty()) {
+            m_assetImportCurrentDirectory = std::filesystem::current_path(ec);
+        }
+
+        ImGui::Text("Current Directory");
+        ImGui::TextWrapped("%s", m_assetImportCurrentDirectory.string().c_str());
+
+        if (ImGui::Button("Up")) {
+            const std::filesystem::path parent = m_assetImportCurrentDirectory.parent_path();
+            if (!parent.empty()) {
+                m_assetImportCurrentDirectory = parent;
+                m_assetImportSelectedPath.clear();
+            }
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Assets Root")) {
+            const std::filesystem::path assetRoot = FileSystem::getAssetRootDirectory();
+            if (!assetRoot.empty() && std::filesystem::exists(assetRoot, ec)) {
+                m_assetImportCurrentDirectory = assetRoot;
+                m_assetImportSelectedPath.clear();
+            }
+        }
+
+        std::vector<std::filesystem::path> directories;
+        std::vector<std::filesystem::path> files;
+        if (std::filesystem::exists(m_assetImportCurrentDirectory, ec)) {
+            for (const std::filesystem::directory_entry& entry : std::filesystem::directory_iterator(m_assetImportCurrentDirectory, ec)) {
+                if (entry.is_directory(ec)) {
+                    directories.push_back(entry.path());
+                } else if (entry.is_regular_file(ec) && isAssetPathAllowedForMode(entry.path(), m_assetImportMode)) {
+                    files.push_back(entry.path());
+                }
+            }
+        }
+
+        std::sort(directories.begin(), directories.end());
+        std::sort(files.begin(), files.end());
+
+        if (ImGui::BeginChild("AssetImportBrowserEntries", ImVec2(0.0f, -56.0f), true)) {
+            for (const std::filesystem::path& dirPath : directories) {
+                const std::string label = "[DIR] " + dirPath.filename().string();
+                if (ImGui::Selectable(label.c_str(), false)) {
+                    m_assetImportCurrentDirectory = dirPath;
+                    m_assetImportSelectedPath.clear();
+                }
+            }
+
+            for (const std::filesystem::path& filePath : files) {
+                const bool selected = filePath == m_assetImportSelectedPath;
+                if (ImGui::Selectable(filePath.filename().string().c_str(), selected)) {
+                    m_assetImportSelectedPath = filePath;
+                }
+            }
+        }
+        ImGui::EndChild();
+
+        ImGui::TextWrapped("Selected: %s", m_assetImportSelectedPath.empty() ? "None" : m_assetImportSelectedPath.string().c_str());
+
+        const bool hasSelection = !m_assetImportSelectedPath.empty();
+        if (!hasSelection) {
+            ImGui::BeginDisabled();
+        }
+        if (ImGui::Button("Import", ImVec2(120.0f, 0.0f))) {
+            const bool imported = importRuntimeAssetFromPath(m_assetImportSelectedPath.string(), m_assetImportMode);
+            if (imported) {
+                AssetManager::saveSceneAssetCache(m_activeScene);
+                m_assetImportBrowserOpen = false;
+                ImGui::CloseCurrentPopup();
+            }
+        }
+        if (!hasSelection) {
+            ImGui::EndDisabled();
+        }
+
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel", ImVec2(120.0f, 0.0f))) {
+            m_assetImportBrowserOpen = false;
+            ImGui::CloseCurrentPopup();
+        }
+
+        ImGui::EndPopup();
+
+        m_assetImportBrowserOpen = keepOpen && m_assetImportBrowserOpen;
+    }
+
+    bool UILayer::importRuntimeAssetFromPath(const std::string& assetPath, RuntimeImportMode mode) {
+        const RuntimeAssetImportResult result = RuntimeAssetImportService::importAsset(
+            m_activeScene,
+            assetPath,
+            mode,
+            std::max(1, m_runtimeTexture3DDepth)
+        );
+
+        for (const std::string& message : result.messages) {
+            appendTerminalLine(message);
+        }
+
+        return result.success;
     }
 
     void UILayer::onAttach() {
@@ -1097,6 +1030,8 @@ namespace Valkron {
         m_activeScene.setGameStateValue("SelectedEntity", "None");
 
         AssetLoader::initialize();
+        AssetManager::setCachePath(AssetManager::getDefaultCachePath());
+        AssetManager::loadSceneAssetCache(m_activeScene);
 
         auto loadEntityIconTexture = [](const std::string& iconPath) -> std::shared_ptr<Texture> {
             auto texture = std::make_shared<Texture>();
@@ -1139,11 +1074,18 @@ namespace Valkron {
         m_runtimeTexture3DDepth = std::max(1, m_runtimeTexture3DDepth);
         m_assetBrowserFolderFilter.clear();
         m_selectedAssetIndex = -1;
+        m_assetImportBrowserOpen = false;
+        m_assetImportBrowserRequestOpen = false;
+        m_assetImportMode = RuntimeImportMode::Auto;
+        m_assetImportDialogTitle = "Import Asset";
+        m_assetImportCurrentDirectory.clear();
+        m_assetImportSelectedPath.clear();
         m_showSettingsPanel = false;
-        m_showDebugPanel = false;
+        m_showDebugPanel = true;
         m_dockspaceBuilt = false;
         m_gizmoOperationIndex = 0;
         m_gizmoWorldMode = false;
+        m_showGameViewPanel = true;
 
         m_topNavbarPanelController = std::make_unique<TopNavbarPanel>([this]() {
             drawTopNavbar();
@@ -1156,6 +1098,9 @@ namespace Valkron {
         });
         m_sceneViewPanelController = std::make_unique<SceneViewPanel>([this](float frameDeltaTime) {
             drawSceneViewPanel(frameDeltaTime);
+        });
+        m_gameViewPanelController = std::make_unique<GameViewPanel>([this](float frameDeltaTime) {
+            drawGameViewPanel(frameDeltaTime);
         });
         m_inspectorPanelController = std::make_unique<InspectorPanel>([this]() {
             drawInspectorPanel();
@@ -1179,6 +1124,7 @@ namespace Valkron {
         m_dockspacePanelController.reset();
         m_sceneHierarchyPanelController.reset();
         m_sceneViewPanelController.reset();
+        m_gameViewPanelController.reset();
         m_inspectorPanelController.reset();
         m_settingsPanelController.reset();
         m_debugPanelController.reset();
@@ -1264,6 +1210,12 @@ namespace Valkron {
             }
         }
 
+        if (m_showGameViewPanel) {
+            if (m_gameViewPanelController != nullptr) {
+                m_gameViewPanelController->render(deltaTime);
+            }
+        }
+
         if (m_showInspectorPanel) {
             if (m_inspectorPanelController != nullptr) {
                 m_inspectorPanelController->render(deltaTime);
@@ -1287,6 +1239,8 @@ namespace Valkron {
                 m_debugPanelController->render(deltaTime);
             }
         }
+
+        drawAssetImportFileBrowser();
 
         m_resetLayoutRequested = false;
     }
@@ -1382,43 +1336,9 @@ namespace Valkron {
             ImGui::BulletText("Mouse wheel: zoom in/out");
             ImGui::BulletText("Ctrl + right mouse drag: pan scene");
             ImGui::BulletText("Right click: open this options menu");
-
             ImGui::Spacing();
-            if (ImGui::SliderFloat("Rotate Speed", &m_sceneCameraRotateSpeed, 0.002f, 0.03f, "%.3f")) {
-                changedCamera = true;
-            }
-            if (ImGui::SliderFloat("Pan Speed", &m_sceneCameraPanSpeed, 0.0005f, 0.02f, "%.4f")) {
-                changedCamera = true;
-            }
-            if (ImGui::SliderFloat("Zoom Speed", &m_sceneCameraZoomSpeed, 0.02f, 0.40f, "%.2f")) {
-                changedCamera = true;
-            }
-            ImGui::Checkbox("Invert Pan", &m_sceneCameraInvertPan);
-
-            ImGui::Spacing();
-            ImGui::Separator();
-            ImGui::TextDisabled("Grid");
-            ImGui::Checkbox("Show Grid", &m_showSceneGrid);
-            ImGui::SetNextItemWidth(120.0f);
-            ImGui::SliderInt("Grid Half Extent", &m_sceneGridHalfExtent, 2, 64);
-            ImGui::SetNextItemWidth(120.0f);
-            ImGui::SliderFloat("Grid Spacing", &m_sceneGridSpacing, 0.25f, 10.0f, "%.2f");
-
-            ImGui::Spacing();
-            ImGui::Separator();
-            ImGui::TextDisabled("Gizmo");
-            ImGui::BulletText("W: Translate");
-            ImGui::BulletText("E: Rotate");
-            ImGui::BulletText("R: Scale");
-
-            if (ImGui::Button("Reset Camera")) {
-                m_sceneCameraPivot = glm::vec3(0.0f, 0.0f, 0.0f);
-                m_sceneCameraDistance = 2.0f;
-                m_sceneCameraYawRadians = 0.0f;
-                m_sceneCameraPitchRadians = 0.0f;
-                m_sceneCameraUp = glm::vec3(0.0f, 1.0f, 0.0f);
-                changedCamera = true;
-            }
+            ImGui::TextDisabled("Tuning controls moved to Settings > Scene View and Gizmo.");
+            ImGui::TextDisabled("Shortcuts: W Translate, E Rotate, R Scale");
 
             ImGui::EndPopup();
         }
@@ -1429,212 +1349,34 @@ namespace Valkron {
     }
 
     bool UILayer::loadRuntimeTexture2D() {
-        const std::string texturePath = openFileDialogNative("Select 2D Texture", kImageFileFilter);
-        if (texturePath.empty()) {
-            return false;
-        }
-
-        const std::vector<std::string> existingNames = collectAllRuntimeAssetNames();
-        const std::string textureName = makeUniqueAssetName(deriveAssetBaseName(texturePath, "Texture2D"), existingNames);
-
-        if (!AssetLoader::loadTexture2D(textureName, texturePath)) {
-            appendTerminalLine("Failed to import 2D texture: " + texturePath);
-            return false;
-        }
-
-        m_activeScene.addAsset(textureName, texturePath);
-        appendTerminalLine("Imported 2D texture: " + textureName + " from " + texturePath);
+        openAssetImportBrowser(RuntimeImportMode::Texture2D, "Import 2D Texture");
         return true;
     }
 
     bool UILayer::loadRuntimeTexture3D() {
-        const std::string texturePath = openFileDialogNative("Select 3D Texture Source", kImageFileFilter);
-        if (texturePath.empty()) {
-            return false;
-        }
-
         m_runtimeTexture3DDepth = std::max(1, m_runtimeTexture3DDepth);
-
-        const std::vector<std::string> existingNames = collectAllRuntimeAssetNames();
-        const std::string textureName = makeUniqueAssetName(deriveAssetBaseName(texturePath, "Texture3D"), existingNames);
-
-        if (!AssetLoader::loadTexture3D(textureName, texturePath, m_runtimeTexture3DDepth)) {
-            appendTerminalLine("Failed to import 3D texture: " + texturePath);
-            return false;
-        }
-
-        m_activeScene.addAsset(textureName, texturePath);
-        appendTerminalLine("Imported 3D texture: " + textureName + " (depth " + std::to_string(m_runtimeTexture3DDepth) + ")");
+        openAssetImportBrowser(RuntimeImportMode::Texture3D, "Import 3D Texture");
         return true;
     }
 
     bool UILayer::loadRuntimeShader() {
-        const std::string vertexPath = openFileDialogNative("Select Vertex Shader", kVertexShaderFilter);
-        if (vertexPath.empty()) {
-            return false;
-        }
-
-        const std::string fragmentPath = openFileDialogNative("Select Fragment Shader", kFragmentShaderFilter);
-        if (fragmentPath.empty()) {
-            return false;
-        }
-
-        std::string baseName = deriveAssetBaseName(vertexPath, "Shader");
-        if (baseName.ends_with("_vert")) {
-            baseName = baseName.substr(0, baseName.size() - 5);
-        }
-
-        const std::vector<std::string> existingNames = collectAllRuntimeAssetNames();
-        const std::string shaderName = makeUniqueAssetName(baseName, existingNames);
-
-        if (!AssetLoader::loadShader(shaderName, vertexPath, fragmentPath)) {
-            appendTerminalLine("Failed to import shader pair: " + vertexPath + " + " + fragmentPath);
-            return false;
-        }
-
-        m_activeScene.addAsset(shaderName + "_vert", vertexPath);
-        m_activeScene.addAsset(shaderName + "_frag", fragmentPath);
-        appendTerminalLine("Imported shader pair: " + shaderName);
+        openAssetImportBrowser(RuntimeImportMode::Shader, "Import Shader Pair");
         return true;
     }
 
     bool UILayer::loadRuntimeComputeShader() {
-        const std::string computePath = openFileDialogNative("Select Compute Shader", kComputeShaderFilter);
-        if (computePath.empty()) {
-            return false;
-        }
-
-        const std::vector<std::string> existingNames = collectAllRuntimeAssetNames();
-        const std::string shaderName = makeUniqueAssetName(deriveAssetBaseName(computePath, "Compute"), existingNames);
-
-        if (!AssetLoader::loadComputeShader(shaderName, computePath)) {
-            appendTerminalLine("Failed to import compute shader: " + computePath);
-            return false;
-        }
-
-        m_activeScene.addAsset(shaderName, computePath);
-        appendTerminalLine("Imported compute shader: " + shaderName);
+        openAssetImportBrowser(RuntimeImportMode::Compute, "Import Compute Shader");
         return true;
     }
 
     bool UILayer::loadRuntimeModel() {
-        const std::string modelPath = openFileDialogNative("Select Model", kModelFileFilter);
-        if (modelPath.empty()) {
-            return false;
-        }
-
-        const std::vector<std::string> existingNames = collectAllRuntimeAssetNames();
-        const std::string modelName = makeUniqueAssetName(deriveAssetBaseName(modelPath, "Model"), existingNames);
-
-        if (!AssetLoader::loadModel(modelName, modelPath)) {
-            appendTerminalLine("Failed to import model: " + modelPath);
-            return false;
-        }
-
-        m_activeScene.addAsset(modelName, modelPath);
-
-        const int importedMaterialTextures = registerImportedModelMaterialTextures(m_activeScene, modelName);
-        if (importedMaterialTextures > 0) {
-            appendTerminalLine(
-                "Imported " + std::to_string(importedMaterialTextures) +
-                " material texture(s) for model " + modelName + "."
-            );
-        }
-
-        appendTerminalLine("Imported model asset: " + modelName + ". Drag it into Scene View to create an entity.");
+        openAssetImportBrowser(RuntimeImportMode::Model, "Import Model");
         return true;
     }
 
     bool UILayer::loadRuntimeAssetAuto() {
-        const std::string assetPath = openFileDialogNative("Import Asset", kAllRuntimeAssetFilter);
-        if (assetPath.empty()) {
-            return false;
-        }
-
-        const std::filesystem::path selectedPath(assetPath);
-        const std::string extension = toLowercase(selectedPath.extension().string());
-        const std::vector<std::string> existingNames = collectAllRuntimeAssetNames();
-
-        if (isTextureImageExtension(extension)) {
-            const std::string lowerPath = toLowercase(assetPath);
-            const bool importAsVolume = lowerPath.find("_3d") != std::string::npos || lowerPath.find("volume") != std::string::npos;
-            const std::string fallbackName = importAsVolume ? "Texture3D" : "Texture2D";
-            const std::string textureName = makeUniqueAssetName(deriveAssetBaseName(assetPath, fallbackName), existingNames);
-
-            const bool loaded = importAsVolume
-                ? AssetLoader::loadTexture3D(textureName, assetPath, std::max(1, m_runtimeTexture3DDepth))
-                : AssetLoader::loadTexture2D(textureName, assetPath);
-
-            if (!loaded) {
-                appendTerminalLine("Failed to import texture asset: " + assetPath);
-                return false;
-            }
-
-            m_activeScene.addAsset(textureName, assetPath);
-            appendTerminalLine("Imported texture: " + textureName + (importAsVolume ? " (3D)" : " (2D)"));
-            return true;
-        }
-
-        if (isModelAssetExtension(extension)) {
-            const std::string modelName = makeUniqueAssetName(deriveAssetBaseName(assetPath, "Model"), existingNames);
-            if (!AssetLoader::loadModel(modelName, assetPath)) {
-                appendTerminalLine("Failed to import model asset: " + assetPath);
-                return false;
-            }
-
-            m_activeScene.addAsset(modelName, assetPath);
-
-            const int importedMaterialTextures = registerImportedModelMaterialTextures(m_activeScene, modelName);
-            if (importedMaterialTextures > 0) {
-                appendTerminalLine(
-                    "Imported " + std::to_string(importedMaterialTextures) +
-                    " material texture(s) for model " + modelName + "."
-                );
-            }
-
-            appendTerminalLine("Imported model asset: " + modelName + ". Drag it into Scene View to create an entity.");
-            return true;
-        }
-
-        const std::string fileNameLower = toLowercase(selectedPath.filename().string());
-        if (isComputeShaderExtension(extension) || (extension == ".glsl" && fileNameLower.find("comp") != std::string::npos)) {
-            const std::string computeName = makeUniqueAssetName(deriveAssetBaseName(assetPath, "Compute"), existingNames);
-            if (!AssetLoader::loadComputeShader(computeName, assetPath)) {
-                appendTerminalLine("Failed to import compute shader: " + assetPath);
-                return false;
-            }
-
-            m_activeScene.addAsset(computeName, assetPath);
-            appendTerminalLine("Imported compute shader: " + computeName);
-            return true;
-        }
-
-        if (isVertexShaderExtension(extension) || isFragmentShaderExtension(extension) || extension == ".glsl") {
-            const std::optional<std::pair<std::string, std::string>> shaderPair = resolveShaderPair(selectedPath);
-            if (!shaderPair.has_value()) {
-                appendTerminalLine("Unable to auto-resolve shader pair. Select a .vert/.frag (or .vs/.fs) file with matching sibling file.");
-                return false;
-            }
-
-            std::string baseName = deriveAssetBaseName(shaderPair->first, "Shader");
-            if (baseName.ends_with("_vert")) {
-                baseName = baseName.substr(0, baseName.size() - 5);
-            }
-
-            const std::string shaderName = makeUniqueAssetName(baseName, existingNames);
-            if (!AssetLoader::loadShader(shaderName, shaderPair->first, shaderPair->second)) {
-                appendTerminalLine("Failed to import shader pair: " + shaderPair->first + " + " + shaderPair->second);
-                return false;
-            }
-
-            m_activeScene.addAsset(shaderName + "_vert", shaderPair->first);
-            m_activeScene.addAsset(shaderName + "_frag", shaderPair->second);
-            appendTerminalLine("Imported shader pair: " + shaderName);
-            return true;
-        }
-
-        appendTerminalLine("Unsupported asset type for import: " + assetPath);
-        return false;
+        openAssetImportBrowser(RuntimeImportMode::Auto, "Import Runtime Asset");
+        return true;
     }
 
     void UILayer::appendTerminalLine(const std::string& line) {
@@ -1764,6 +1506,37 @@ namespace Valkron {
             } else {
                 appendTerminalLine("Failed to reload engine settings from config file.");
             }
+        }
+
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Text("Scene View and Gizmo");
+
+        ImGui::SetNextItemWidth(170.0f);
+        ImGui::SliderFloat("Orbit Rotate Speed", &m_sceneCameraRotateSpeed, 0.002f, 0.03f, "%.3f");
+        ImGui::SetNextItemWidth(170.0f);
+        ImGui::SliderFloat("Pan Speed", &m_sceneCameraPanSpeed, 0.0005f, 0.02f, "%.4f");
+        ImGui::SetNextItemWidth(170.0f);
+        ImGui::SliderFloat("Zoom Speed", &m_sceneCameraZoomSpeed, 0.02f, 0.40f, "%.2f");
+        ImGui::Checkbox("Invert Pan", &m_sceneCameraInvertPan);
+
+        ImGui::SetNextItemWidth(170.0f);
+        ImGui::SliderInt("Grid Half Extent", &m_sceneGridHalfExtent, 2, 64);
+        ImGui::SetNextItemWidth(170.0f);
+        ImGui::SliderFloat("Grid Spacing", &m_sceneGridSpacing, 0.25f, 10.0f, "%.2f");
+
+        ImGui::SetNextItemWidth(170.0f);
+        ImGui::SliderFloat("Gizmo Size", &m_gizmoSizeClipSpace, 0.06f, 0.30f, "%.2f");
+        ImGui::SetNextItemWidth(170.0f);
+        ImGui::SliderFloat("Gizmo Rotation Sensitivity", &m_gizmoRotationSensitivity, 0.25f, 1.5f, "x%.2f");
+
+        if (ImGui::Button("Reset Scene Camera")) {
+            m_sceneCameraPivot = glm::vec3(0.0f, 0.0f, 0.0f);
+            m_sceneCameraDistance = 2.0f;
+            m_sceneCameraYawRadians = 0.0f;
+            m_sceneCameraPitchRadians = 0.0f;
+            m_sceneCameraUp = glm::vec3(0.0f, 1.0f, 0.0f);
+            syncRendererCameraFromController();
         }
     }
 

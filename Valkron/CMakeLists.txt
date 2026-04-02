@@ -38,6 +38,10 @@ if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/vendor/imguizmo/ImGuizmo.cpp")
     message(FATAL_ERROR "ImGuizmo submodule not found! Please run: git submodule update --init --recursive")
 endif()
 
+if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/vendor/imviewguizmo/ImViewGuizmo.h")
+    message(FATAL_ERROR "ImViewGuizmo submodule not found! Please run: git submodule update --init --recursive")
+endif()
+
 set(IMGUI_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/vendor/imgui/imgui.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/vendor/imgui/imgui_draw.cpp
@@ -70,7 +74,22 @@ endif()
 set(ASSIMP_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(ASSIMP_BUILD_ASSIMP_TOOLS OFF CACHE BOOL "" FORCE)
 set(ASSIMP_INSTALL OFF CACHE BOOL "" FORCE)
+set(ASSIMP_BUILD_NO_OWN_ZLIB OFF CACHE BOOL "" FORCE)
+set(ASSIMP_BUILD_ZLIB ON CACHE BOOL "" FORCE)
+set(ASSIMP_BUILD_MINIZIP ON CACHE BOOL "" FORCE)
+set(ASSIMP_WARNINGS_AS_ERRORS OFF CACHE BOOL "" FORCE)
 add_subdirectory(vendor/assimp)
+
+if(TARGET assimp)
+    target_sources(assimp PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/vendor/assimp/contrib/unzip/unzip.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/vendor/assimp/contrib/unzip/ioapi.c
+    )
+    target_include_directories(assimp PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/vendor/assimp/contrib/unzip
+        ${CMAKE_CURRENT_SOURCE_DIR}/vendor/assimp/contrib/zlib/contrib/minizip
+    )
+endif()
 
 # Add source & header files
 file(GLOB_RECURSE PROJECT_HEADERS CONFIGURE_DEPENDS
@@ -92,6 +111,7 @@ target_include_directories(${PROJECT_NAME}
     PUBLIC  ${CMAKE_CURRENT_SOURCE_DIR}/vendor/imgui
     PUBLIC  ${CMAKE_CURRENT_SOURCE_DIR}/vendor/imgui/backends
     PUBLIC  ${CMAKE_CURRENT_SOURCE_DIR}/vendor/imguizmo
+    PUBLIC  ${CMAKE_CURRENT_SOURCE_DIR}/vendor/imviewguizmo
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/vendor/stb
 )
 

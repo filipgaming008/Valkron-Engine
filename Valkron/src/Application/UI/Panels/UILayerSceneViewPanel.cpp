@@ -1,5 +1,12 @@
 ﻿#include "Application/UI/Panels/UILayerPanelsInternal.hpp"
 
+#define IMVIEWGUIZMO_IMPLEMENTATION
+#define ImLengthSqr ImViewGuizmo_ImLengthSqr
+#include "ImViewGuizmo.h"
+#undef ImLengthSqr
+
+#include "glm/gtx/quaternion.hpp"
+
 namespace Valkron {
 
     void UILayer::drawSceneViewPanel(float deltaTime) {
@@ -11,92 +18,80 @@ namespace Valkron {
 
         drawWindowPanelGradient();
 
-        ImGui::Text("Renderer Output");
-        ImGui::Separator();
-        ImGui::Text("Frame dt: %.3f ms", deltaTime * 1000.0f);
-        ImGui::Text("FPS: %.1f", deltaTime > 0.0f ? (1.0f / deltaTime) : 0.0f);
-        ImGui::Text("Mode: %s", sceneStateToString(m_activeScene.getState()));
-
         const auto& entities = m_activeScene.getEntityData();
         const bool hasSelectedEntity = m_selectedEntityIndex >= 0 && m_selectedEntityIndex < static_cast<int>(entities.size());
-        ImGui::Text("Selected Entity: %s", hasSelectedEntity ? entities[static_cast<std::size_t>(m_selectedEntityIndex)].name.c_str() : "None");
 
-        if (ImGui::BeginCombo("Scene Selection", hasSelectedEntity ? entities[static_cast<std::size_t>(m_selectedEntityIndex)].name.c_str() : "None")) {
-            if (ImGui::Selectable("None", !hasSelectedEntity)) {
-                clearEntitySelection();
+            ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 4.0f);
+            ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 2.0f);
+            ImGui::PushStyleColor(ImGuiCol_ChildBg, IM_COL32(19, 21, 24, 230));
+            ImGui::PushStyleColor(ImGuiCol_Border, IM_COL32(130, 40, 40, 135));
+            if (ImGui::BeginChild("SceneViewHeaderStrip", ImVec2(0.0f, 72.0f), true, ImGuiWindowFlags_NoScrollbar)) {
+                const float frameMs = deltaTime * 1000.0f;
+                const float fps = deltaTime > 0.0f ? (1.0f / deltaTime) : 0.0f;
+
+                ImGui::TextUnformatted("Scene Renderer | Edit");
+                ImGui::Separator();
+                ImGui::Text("Frame %.2f ms  FPS %.1f  Viewport %dx%d", frameMs, fps, Renderer::getViewportWidth(), Renderer::getViewportHeight());
             }
+            ImGui::EndChild();
+            ImGui::PopStyleColor(2);
+            ImGui::PopStyleVar(2);
 
-            for (std::size_t i = 0; i < entities.size(); ++i) {
-                const bool selected = static_cast<int>(i) == m_selectedEntityIndex;
-                if (ImGui::Selectable(entities[i].name.c_str(), selected)) {
-                    setSelectedEntity(static_cast<int>(i));
+            ImGui::Text("Selected Entity: %s", hasSelectedEntity ? entities[static_cast<std::size_t>(m_selectedEntityIndex)].name.c_str() : "None");
+
+            ImGui::PushStyleColor(ImGuiCol_ChildBg, IM_COL32(20, 22, 25, 220));
+            ImGui::PushStyleColor(ImGuiCol_Border, IM_COL32(122, 36, 36, 120));
+            if (ImGui::BeginChild("SceneViewControlStrip", ImVec2(0.0f, 42.0f), true, ImGuiWindowFlags_NoScrollbar)) {
+                ImGui::SetNextItemWidth(190.0f);
+                if (ImGui::BeginCombo("##SceneSelection", hasSelectedEntity ? entities[static_cast<std::size_t>(m_selectedEntityIndex)].name.c_str() : "None")) {
+                    if (ImGui::Selectable("None", !hasSelectedEntity)) {
+                        clearEntitySelection();
+                    }
+
+                    for (std::size_t i = 0; i < entities.size(); ++i) {
+                        const bool selected = static_cast<int>(i) == m_selectedEntityIndex;
+                        if (ImGui::Selectable(entities[i].name.c_str(), selected)) {
+                            setSelectedEntity(static_cast<int>(i));
+                        }
+
+                        if (selected) {
+                            ImGui::SetItemDefaultFocus();
+                        }
+                    }
+
+                    ImGui::EndCombo();
                 }
 
-                if (selected) {
-                    ImGui::SetItemDefaultFocus();
+                ImGui::SameLine();
+                if (ImGui::Button("Deselect##SceneViewSelection")) {
+                    clearEntitySelection();
                 }
+
+                ImGui::SameLine();
+                ImGui::Checkbox("Grid", &m_showSceneGrid);
+                ImGui::SameLine();
+                if (ImGui::RadioButton("T", m_gizmoOperationIndex == 0)) {
+                    m_gizmoOperationIndex = 0;
+                }
+                ImGui::SameLine();
+                if (ImGui::RadioButton("R", m_gizmoOperationIndex == 1)) {
+                    m_gizmoOperationIndex = 1;
+                }
+                ImGui::SameLine();
+                if (ImGui::RadioButton("S", m_gizmoOperationIndex == 2)) {
+                    m_gizmoOperationIndex = 2;
+                }
+                ImGui::SameLine();
+                ImGui::Checkbox("World", &m_gizmoWorldMode);
+                ImGui::SameLine();
+                ImGui::Checkbox("Snap", &m_gizmoSnapEnabled);
             }
-
-            ImGui::EndCombo();
-        }
-
-        ImGui::SameLine();
-        if (ImGui::Button("Deselect##SceneViewSelection")) {
-            clearEntitySelection();
-        }
-
-        ImGui::SameLine();
-        ImGui::Checkbox("Grid", &m_showSceneGrid);
-        ImGui::SameLine();
-        if (ImGui::RadioButton("T", m_gizmoOperationIndex == 0)) {
-            m_gizmoOperationIndex = 0;
-        }
-        ImGui::SameLine();
-        if (ImGui::RadioButton("R", m_gizmoOperationIndex == 1)) {
-            m_gizmoOperationIndex = 1;
-        }
-        ImGui::SameLine();
-        if (ImGui::RadioButton("S", m_gizmoOperationIndex == 2)) {
-            m_gizmoOperationIndex = 2;
-        }
-        ImGui::SameLine();
-        ImGui::Checkbox("World", &m_gizmoWorldMode);
-        ImGui::SameLine();
-        ImGui::Checkbox("Snap", &m_gizmoSnapEnabled);
-
-        ImGui::SetNextItemWidth(130.0f);
-        ImGui::SliderFloat("Gizmo Size", &m_gizmoSizeClipSpace, 0.06f, 0.22f, "%.2f");
-        ImGui::SameLine();
-        ImGui::SetNextItemWidth(130.0f);
-        ImGui::SliderFloat("Rot Speed", &m_gizmoRotationSensitivity, 0.25f, 1.5f, "x%.2f");
-
-        if (m_gizmoSnapEnabled) {
-            ImGui::SetNextItemWidth(190.0f);
-            if (m_gizmoOperationIndex == 0) {
-                ImGui::DragFloat("Move Snap", &m_gizmoTranslateSnap, 0.01f, 0.01f, 100.0f, "%.2f");
-            } else if (m_gizmoOperationIndex == 1) {
-                ImGui::DragFloat("Rotate Snap", &m_gizmoRotateSnapDegrees, 0.25f, 0.25f, 180.0f, "%.1f deg");
-            } else {
-                ImGui::DragFloat("Scale Snap", &m_gizmoScaleSnap, 0.01f, 0.01f, 10.0f, "%.2f");
-            }
-        }
+            ImGui::EndChild();
+            ImGui::PopStyleColor(2);
 
         m_gizmoTranslateSnap = std::max(0.01f, m_gizmoTranslateSnap);
         m_gizmoRotateSnapDegrees = std::max(0.25f, m_gizmoRotateSnapDegrees);
         m_gizmoScaleSnap = std::max(0.01f, m_gizmoScaleSnap);
-
-        if (hasSelectedEntity) {
-            const glm::mat4 selectedWorld = composeEntityWorldTransformMatrix(entities, static_cast<std::size_t>(m_selectedEntityIndex));
-            const glm::vec3 selectedWorldPosition = extractWorldPosition(selectedWorld);
-
-            ImGui::TextUnformatted("World XYZ:");
-            ImGui::SameLine();
-            ImGui::TextColored(ImVec4(0.95f, 0.38f, 0.38f, 1.0f), "X %.2f", selectedWorldPosition.x);
-            ImGui::SameLine();
-            ImGui::TextColored(ImVec4(0.36f, 0.87f, 0.44f, 1.0f), "Y %.2f", selectedWorldPosition.y);
-            ImGui::SameLine();
-            ImGui::TextColored(ImVec4(0.42f, 0.63f, 0.95f, 1.0f), "Z %.2f", selectedWorldPosition.z);
-        }
 
         ImGui::Spacing();
         const ImVec2 availableRegion = ImGui::GetContentRegionAvail();
@@ -167,6 +162,46 @@ namespace Valkron {
         const ImVec2 imageRectMax = ImGui::GetItemRectMax();
         const bool imageClicked = ImGui::IsItemClicked(ImGuiMouseButton_Left);
         m_sceneViewImageHovered = ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenBlockedByPopup);
+
+        {
+            ImViewGuizmo::BeginFrame();
+            ImViewGuizmo::Style& viewGizmoStyle = ImViewGuizmo::GetStyle();
+            viewGizmoStyle.scale = 0.50f;
+            viewGizmoStyle.bigCircleRadius = 62.0f;
+            viewGizmoStyle.lineWidth = 3.0f;
+            viewGizmoStyle.circleRadius = 12.0f;
+            viewGizmoStyle.toolButtonRadius = 18.0f;
+            viewGizmoStyle.labelSize = 0.90f;
+
+            const float gizmoInset = 94.0f;
+            const ImVec2 gizmoPos(imageRectMax.x - gizmoInset, imageRectMin.y + 14.0f);
+            const glm::vec3 cameraPos = Renderer::getCameraPosition();
+            const glm::vec3 pivot = Renderer::getCameraTarget();
+            const glm::vec3 toCamera = cameraPos - pivot;
+
+            if (glm::length(toCamera) > 0.0001f) {
+                glm::vec3 viewDir = glm::normalize(toCamera);
+                glm::quat viewRot = glm::quatLookAt(viewDir, m_sceneCameraUp);
+                glm::vec3 mutablePos = cameraPos;
+
+                bool cameraChanged = false;
+                cameraChanged |= ImViewGuizmo::Rotate(mutablePos, viewRot, pivot, gizmoPos, m_sceneCameraRotateSpeed);
+                cameraChanged |= ImViewGuizmo::Dolly(mutablePos, viewRot, ImVec2(gizmoPos.x - 20.0f, gizmoPos.y + 118.0f), m_sceneCameraZoomSpeed);
+                cameraChanged |= ImViewGuizmo::Pan(mutablePos, viewRot, ImVec2(gizmoPos.x + 20.0f, gizmoPos.y + 118.0f), m_sceneCameraPanSpeed);
+
+                if (cameraChanged) {
+                    const glm::vec3 newOffset = mutablePos - pivot;
+                    const float newDistance = glm::length(newOffset);
+                    if (newDistance > 0.0001f) {
+                        m_sceneCameraPivot = pivot;
+                        m_sceneCameraDistance = std::max(0.15f, newDistance);
+                        m_sceneCameraPitchRadians = std::clamp(std::asin(newOffset.y / m_sceneCameraDistance), -1.52f, 1.52f);
+                        m_sceneCameraYawRadians = std::atan2(newOffset.x, newOffset.z);
+                        syncRendererCameraFromController();
+                    }
+                }
+            }
+        }
 
         if (m_sceneViewImageHovered) {
             if (ImGui::IsKeyPressed(ImGuiKey_W, false)) {

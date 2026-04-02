@@ -71,6 +71,12 @@ namespace Valkron {
                 : DeltaEditorPanel("SceneView", std::move(drawCallback)) {}
     };
 
+    class VALKRON_API GameViewPanel final : public DeltaEditorPanel {
+        public:
+            explicit GameViewPanel(DrawCallback drawCallback)
+                : DeltaEditorPanel("GameView", std::move(drawCallback)) {}
+    };
+
     class VALKRON_API InspectorPanel final : public StaticEditorPanel {
         public:
             explicit InspectorPanel(DrawCallback drawCallback)
