@@ -11,17 +11,33 @@ namespace Valkron {
 
         drawWindowPanelGradient();
 
-        const unsigned int frameTextureID = Renderer::getFrameTextureID();
+        const unsigned int frameTextureID = Renderer::getGameFrameTextureID();
         const int renderWidth = Renderer::getViewportWidth();
         const int renderHeight = Renderer::getViewportHeight();
 
+        const auto& entities = m_activeScene.getEntityData();
+        std::string primaryPlayCameraName = m_activeScene.getGameStateValue("PrimaryCameraEntity").value_or("");
+        const bool primaryPlayCameraExists = std::any_of(entities.begin(), entities.end(), [&](const SceneEntity& entity) {
+            return entity.type == SceneEntityType::Camera && entity.name == primaryPlayCameraName;
+        });
+
+        if (!primaryPlayCameraExists) {
+            for (const SceneEntity& entity : entities) {
+                if (entity.type == SceneEntityType::Camera) {
+                    primaryPlayCameraName = entity.name;
+                    break;
+                }
+            }
+        }
+
         ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 3.0f);
         ImGui::PushStyleColor(ImGuiCol_ChildBg, IM_COL32(9, 13, 20, 215));
-        if (ImGui::BeginChild("GameViewHeader", ImVec2(0.0f, 50.0f), true, ImGuiWindowFlags_NoScrollbar)) {
+        if (ImGui::BeginChild("GameViewHeader", ImVec2(0.0f, 64.0f), true, ImGuiWindowFlags_NoScrollbar)) {
             const float fps = deltaTime > 0.0f ? (1.0f / deltaTime) : 0.0f;
             ImGui::TextUnformatted("Game View");
             ImGui::Separator();
-            ImGui::Text("Play Camera | FPS %.1f", fps);
+            ImGui::Text("%s | FPS %.1f", sceneStateToString(m_activeScene.getState()), fps);
+            ImGui::TextDisabled("Main Camera: %s", primaryPlayCameraName.empty() ? "None" : primaryPlayCameraName.c_str());
         }
         ImGui::EndChild();
         ImGui::PopStyleColor();

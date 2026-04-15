@@ -17,20 +17,20 @@ struct Material {
     float shininess;
 };
 
-struct Light {
-    vec3 position;
+struct DirectionalLight {
+    int enabled;
+    vec3 direction;
     vec3 color;
-    vec3 ambient;
+    float intensity;
+    float ambientStrength;
 };
 
-const int MAX_LIGHTS = 8;
-
 uniform Material u_Material;
-uniform int u_LightCount;
-uniform Light u_Lights[MAX_LIGHTS];
+uniform DirectionalLight u_DirectionalLight;
 uniform vec3 u_ViewPos;
 uniform vec3 u_SelectionColor;
 uniform float u_SelectionMix;
+uniform float u_EditorExposure;
 
 void main() {
     vec3 normal = normalize(fs_in.Normal);
@@ -46,28 +46,23 @@ void main() {
         specularBase = texture(u_Material.specularMap, fs_in.TexCoord).rgb;
     }
 
-    int lightCount = clamp(u_LightCount, 0, MAX_LIGHTS);
-    vec3 ambient = vec3(0.0);
-    vec3 diffuse = vec3(0.0);
-    vec3 specular = vec3(0.0);
+    vec3 shadedColor = baseColor * 0.22;
 
-    for (int i = 0; i < lightCount; ++i) {
-        vec3 lightDir = normalize(u_Lights[i].position - fs_in.FragPos);
+    if (u_DirectionalLight.enabled == 1) {
+        vec3 lightDir = normalize(-u_DirectionalLight.direction);
         vec3 halfwayDir = normalize(lightDir + viewDir);
 
         float diff = max(dot(normal, lightDir), 0.0);
         float spec = pow(max(dot(normal, halfwayDir), 0.0), max(1.0, u_Material.shininess));
 
-        ambient += u_Lights[i].ambient * baseColor;
-        diffuse += diff * baseColor * u_Lights[i].color;
-        specular += spec * specularBase * u_Lights[i].color;
+        vec3 ambient = baseColor * u_DirectionalLight.color * clamp(u_DirectionalLight.ambientStrength, 0.01, 1.0);
+        vec3 diffuse = diff * baseColor * u_DirectionalLight.color * max(0.01, u_DirectionalLight.intensity);
+        vec3 specular = spec * specularBase * u_DirectionalLight.color * max(0.10, u_DirectionalLight.intensity);
+        shadedColor = ambient + diffuse + specular;
     }
 
-    if (lightCount == 0) {
-        ambient = vec3(0.18) * baseColor;
-    }
+    shadedColor *= max(0.01, u_EditorExposure);
 
-    vec3 shadedColor = ambient + diffuse + specular;
     float highlightMix = clamp(u_SelectionMix, 0.0, 1.0);
     shadedColor = mix(shadedColor, u_SelectionColor, highlightMix);
 

@@ -24,15 +24,15 @@ namespace Valkron {
             const ImGuiID dockBottom = ImGui::DockBuilderSplitNode(dockMain, ImGuiDir_Down, 0.34f, nullptr, &dockMain);
 
             ImGuiID dockTopCenter = dockMain;
-            const ImGuiID dockGame = ImGui::DockBuilderSplitNode(dockTopCenter, ImGuiDir_Right, 0.58f, nullptr, &dockTopCenter);
             ImGuiID dockBottomMain = dockBottom;
             const ImGuiID dockBottomRight = ImGui::DockBuilderSplitNode(dockBottomMain, ImGuiDir_Right, 0.38f, nullptr, &dockBottomMain);
 
             ImGui::DockBuilderDockWindow("Scene Hierarchy", dockLeft);
             ImGui::DockBuilderDockWindow("Scene View", dockTopCenter);
-            ImGui::DockBuilderDockWindow("Game View", dockGame);
+            ImGui::DockBuilderDockWindow("Game View", dockTopCenter);
             ImGui::DockBuilderDockWindow("Inspector", dockRight);
-            ImGui::DockBuilderDockWindow("Project", dockBottomMain);
+            ImGui::DockBuilderDockWindow("Asset Manager", dockBottomMain);
+            ImGui::DockBuilderDockWindow("Console", dockBottomMain);
             ImGui::DockBuilderDockWindow("Performance", dockBottomRight);
 
             ImGui::DockBuilderFinish(dockspaceID);

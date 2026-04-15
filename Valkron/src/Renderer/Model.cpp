@@ -14,6 +14,7 @@
 #include <cctype>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <sstream>
 #include <string>
 #include <unordered_set>
@@ -221,9 +222,27 @@ namespace Valkron {
         std::vector<ModelVertex> vertices;
         vertices.reserve(mesh->mNumVertices);
 
+        glm::vec3 meshBoundsMin(
+            std::numeric_limits<float>::max(),
+            std::numeric_limits<float>::max(),
+            std::numeric_limits<float>::max()
+        );
+        glm::vec3 meshBoundsMax(
+            std::numeric_limits<float>::lowest(),
+            std::numeric_limits<float>::lowest(),
+            std::numeric_limits<float>::lowest()
+        );
+
         for (unsigned int i = 0; i < mesh->mNumVertices; ++i) {
             ModelVertex vertex;
             vertex.position = glm::vec3(mesh->mVertices[i].x, mesh->mVertices[i].y, mesh->mVertices[i].z);
+
+            meshBoundsMin.x = std::min(meshBoundsMin.x, vertex.position.x);
+            meshBoundsMin.y = std::min(meshBoundsMin.y, vertex.position.y);
+            meshBoundsMin.z = std::min(meshBoundsMin.z, vertex.position.z);
+            meshBoundsMax.x = std::max(meshBoundsMax.x, vertex.position.x);
+            meshBoundsMax.y = std::max(meshBoundsMax.y, vertex.position.y);
+            meshBoundsMax.z = std::max(meshBoundsMax.z, vertex.position.z);
 
             if (mesh->HasNormals()) {
                 vertex.normal = glm::vec3(mesh->mNormals[i].x, mesh->mNormals[i].y, mesh->mNormals[i].z);
@@ -260,6 +279,9 @@ namespace Valkron {
         layout.push<float>(2);
         builtMesh.vertexArray->addBuffer(*builtMesh.vertexBuffer, layout);
         builtMesh.material = buildMaterial(mesh, scene, modelDirectory);
+        builtMesh.localBoundsMin = meshBoundsMin;
+        builtMesh.localBoundsMax = meshBoundsMax;
+        builtMesh.hasLocalBounds = true;
 
         return builtMesh;
     }
@@ -301,6 +323,7 @@ namespace Valkron {
         if (scene == nullptr || scene->mRootNode == nullptr || (scene->mFlags & AI_SCENE_FLAGS_INCOMPLETE) != 0) {
             LOG_ERROR("Assimp failed to load model: " + m_modelPath + " | " + importer.GetErrorString());
             m_meshes.clear();
+            m_hasLocalBounds = false;
             return false;
         }
 
@@ -312,7 +335,44 @@ namespace Valkron {
         m_referencedTexturePaths.clear();
         if (m_meshes.empty()) {
             LOG_ERROR("Model contains no renderable meshes: " + m_modelPath);
+            m_hasLocalBounds = false;
             return false;
+        }
+
+        bool hasAnyBounds = false;
+        glm::vec3 modelBoundsMin(
+            std::numeric_limits<float>::max(),
+            std::numeric_limits<float>::max(),
+            std::numeric_limits<float>::max()
+        );
+        glm::vec3 modelBoundsMax(
+            std::numeric_limits<float>::lowest(),
+            std::numeric_limits<float>::lowest(),
+            std::numeric_limits<float>::lowest()
+        );
+
+        for (const Mesh& mesh : m_meshes) {
+            if (!mesh.hasLocalBounds) {
+                continue;
+            }
+
+            hasAnyBounds = true;
+            modelBoundsMin.x = std::min(modelBoundsMin.x, mesh.localBoundsMin.x);
+            modelBoundsMin.y = std::min(modelBoundsMin.y, mesh.localBoundsMin.y);
+            modelBoundsMin.z = std::min(modelBoundsMin.z, mesh.localBoundsMin.z);
+            modelBoundsMax.x = std::max(modelBoundsMax.x, mesh.localBoundsMax.x);
+            modelBoundsMax.y = std::max(modelBoundsMax.y, mesh.localBoundsMax.y);
+            modelBoundsMax.z = std::max(modelBoundsMax.z, mesh.localBoundsMax.z);
+        }
+
+        if (hasAnyBounds) {
+            m_localBoundsMin = modelBoundsMin;
+            m_localBoundsMax = modelBoundsMax;
+            m_hasLocalBounds = true;
+        } else {
+            m_localBoundsMin = glm::vec3(0.0f, 0.0f, 0.0f);
+            m_localBoundsMax = glm::vec3(0.0f, 0.0f, 0.0f);
+            m_hasLocalBounds = false;
         }
 
         std::unordered_set<std::string> seenTexturePaths;
@@ -371,6 +431,16 @@ namespace Valkron {
                 mesh.material.specularTexture->unbind();
             }
         }
+    }
+
+    bool Model::getLocalBounds(glm::vec3& outMin, glm::vec3& outMax) const {
+        if (!m_hasLocalBounds) {
+            return false;
+        }
+
+        outMin = m_localBoundsMin;
+        outMax = m_localBoundsMax;
+        return true;
     }
 
 }

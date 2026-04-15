@@ -30,6 +30,9 @@ namespace Valkron {
                 std::unique_ptr<VertexBuffer> vertexBuffer;
                 std::unique_ptr<IndexBuffer> indexBuffer;
                 ModelMaterial material;
+                glm::vec3 localBoundsMin{0.0f, 0.0f, 0.0f};
+                glm::vec3 localBoundsMax{0.0f, 0.0f, 0.0f};
+                bool hasLocalBounds = false;
 
                 Mesh() = default;
                 ~Mesh() = default;
@@ -48,6 +51,7 @@ namespace Valkron {
 
             bool loadFromFile(const std::string& modelPath);
             void draw(const Shader& shader) const;
+            bool getLocalBounds(glm::vec3& outMin, glm::vec3& outMax) const;
 
             bool isLoaded() const { return !m_meshes.empty(); }
             const std::string& getPath() const { return m_modelPath; }
@@ -57,6 +61,9 @@ namespace Valkron {
             std::string m_modelPath;
             std::vector<Mesh> m_meshes;
             std::vector<std::string> m_referencedTexturePaths;
+            glm::vec3 m_localBoundsMin{0.0f, 0.0f, 0.0f};
+            glm::vec3 m_localBoundsMax{0.0f, 0.0f, 0.0f};
+            bool m_hasLocalBounds = false;
     };
 
 }

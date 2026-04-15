@@ -31,5 +31,7 @@ add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_directory
         "${CMAKE_SOURCE_DIR}/Valkron/assets"
         "$<TARGET_FILE_DIR:${PROJECT_NAME}>/assets"
-    COMMENT "Copying app assets (shaders, textures, fonts) to executable output directory"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${CMAKE_SOURCE_DIR}/Valkron/imgui.ini"
+        "$<TARGET_FILE_DIR:${PROJECT_NAME}>/imgui.ini"
 )

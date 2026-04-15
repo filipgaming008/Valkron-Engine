@@ -1,5 +1,6 @@
 #include "Renderer/Renderer.hpp"
 #include "Renderer/Camera.hpp"
+#include "Core/FileSystem.hpp"
 #include "Core/Log.hpp"
 #include "Engine/AssetLoader.hpp"
 #include "Renderer/Buffers.hpp"
@@ -14,6 +15,7 @@
 #include "backends/imgui_impl_opengl3.h"
 #include "glad/gl.h"
 
+#include "glm/geometric.hpp"
 #include "glm/gtc/matrix_transform.hpp"
 #include "glm/gtc/type_ptr.hpp"
 #include "glm/trigonometric.hpp"
@@ -25,6 +27,11 @@
 
 namespace Valkron {
 
+    enum class RenderViewMode {
+        SceneEditor,
+        Game
+    };
+
     struct RendererData {
         std::unique_ptr<Camera> camera;
 
@@ -32,16 +39,26 @@ namespace Valkron {
         std::unique_ptr<Texture> frameTexture;
         std::unique_ptr<DepthBuffer> depthBuffer;
 
+        std::unique_ptr<FrameBuffer> sceneFrameBuffer;
+        std::unique_ptr<Texture> sceneFrameTexture;
+        std::unique_ptr<DepthBuffer> sceneDepthBuffer;
+
         glm::mat4 modelMatrix{1.0f};
         std::vector<SceneModelInstance> sceneModelInstances;
         std::vector<glm::mat4> sceneEntityTransforms;
         std::vector<glm::vec3> lightEntityPositions;
         int selectedEntityRenderIndex = -1;
 
+        glm::vec3 directionalLightDirection = glm::normalize(glm::vec3(-0.40f, -1.00f, -0.30f));
+        glm::vec3 directionalLightColor{1.0f, 1.0f, 0.96f};
+        float directionalLightIntensity = 1.15f;
+        float directionalLightAmbientStrength = 0.24f;
+
         int viewportWidth = 0;
         int viewportHeight = 0;
         int windowFramebufferWidth = 0;
         int windowFramebufferHeight = 0;
+        std::string imguiIniPath;
         GLFWwindow* window = nullptr;
         bool initialized = false;
     };
@@ -114,10 +131,12 @@ namespace Valkron {
         colors[ImGuiCol_DockingPreview] = ImVec4(0.64f, 0.16f, 0.16f, 0.72f);
     }
 
-    static void renderLoadedAssets() {
+    static void renderLoadedAssets(RenderViewMode viewMode) {
         if (s_data.camera == nullptr || s_data.viewportWidth <= 0 || s_data.viewportHeight <= 0) {
             return;
         }
+
+        const bool sceneEditorView = viewMode == RenderViewMode::SceneEditor;
 
         const float aspectRatio = static_cast<float>(s_data.viewportWidth) / static_cast<float>(s_data.viewportHeight);
         const glm::mat4 viewMatrix = s_data.camera->getViewMatrix();
@@ -129,21 +148,17 @@ namespace Valkron {
             return;
         }
 
-        constexpr int kMaxSceneLights = 8;
-        std::vector<glm::vec3> activeLightPositions;
-        if (!s_data.lightEntityPositions.empty()) {
-            activeLightPositions = s_data.lightEntityPositions;
-        } else {
-            activeLightPositions.push_back(glm::vec3(3.0f, 4.0f, 3.0f));
-        }
+        const float editorExposure = sceneEditorView ? 1.32f : 1.00f;
+        const float editorAmbientBoost = sceneEditorView ? 1.35f : 1.00f;
 
-        if (activeLightPositions.size() > static_cast<std::size_t>(kMaxSceneLights)) {
-            activeLightPositions.resize(static_cast<std::size_t>(kMaxSceneLights));
+        glm::vec3 directionalLightDirection = s_data.directionalLightDirection;
+        if (glm::length(directionalLightDirection) < 0.0001f) {
+            directionalLightDirection = glm::vec3(-0.40f, -1.00f, -0.30f);
         }
+        directionalLightDirection = glm::normalize(directionalLightDirection);
 
-        const float ambientStrength = std::clamp(0.05f + static_cast<float>(activeLightPositions.size()) * 0.02f, 0.05f, 0.20f);
-        const glm::vec3 lightColor(1.0f, 1.0f, 1.0f);
-        const glm::vec3 ambientColor(ambientStrength, ambientStrength, ambientStrength + 0.01f);
+        const glm::vec3 directionalLightColor = s_data.directionalLightColor * std::max(0.01f, s_data.directionalLightIntensity);
+        const float directionalAmbientStrength = std::clamp(s_data.directionalLightAmbientStrength * editorAmbientBoost, 0.02f, 0.90f);
         const glm::vec3 cameraPosition = s_data.camera->getPosition();
         const glm::vec3 selectedHighlightColor(0.98f, 0.78f, 0.24f);
 
@@ -157,7 +172,16 @@ namespace Valkron {
                 continue;
             }
 
-            const std::string shaderName = AssetLoader::getModelShader(instance.modelName);
+            std::string shaderName;
+            if (sceneEditorView) {
+                shaderName = "Blinn-Phong";
+                if (AssetLoader::getShader(shaderName) == nullptr) {
+                    shaderName = AssetLoader::getModelShader(instance.modelName);
+                }
+            } else {
+                shaderName = AssetLoader::getModelShader(instance.modelName);
+            }
+
             std::shared_ptr<Shader> shader = AssetLoader::getShader(shaderName);
             if (shader == nullptr) {
                 continue;
@@ -166,32 +190,36 @@ namespace Valkron {
             shader->bind();
             shader->setMat4("u_View", glm::value_ptr(viewMatrix));
             shader->setMat4("u_Projection", glm::value_ptr(projectionMatrix));
-            shader->setInt("u_LightCount", static_cast<int>(activeLightPositions.size()));
-            for (std::size_t lightIndex = 0; lightIndex < activeLightPositions.size(); ++lightIndex) {
-                const std::string prefix = "u_Lights[" + std::to_string(lightIndex) + "]";
-                shader->setVec3(prefix + ".position", &activeLightPositions[lightIndex].x);
-                shader->setVec3(prefix + ".color", &lightColor.x);
-                shader->setVec3(prefix + ".ambient", &ambientColor.x);
-            }
+            shader->setInt("u_DirectionalLight.enabled", 1);
+            shader->setVec3("u_DirectionalLight.direction", &directionalLightDirection.x);
+            shader->setVec3("u_DirectionalLight.color", &directionalLightColor.x);
+            shader->setFloat("u_DirectionalLight.intensity", std::max(0.01f, s_data.directionalLightIntensity));
+            shader->setFloat("u_DirectionalLight.ambientStrength", directionalAmbientStrength);
+            shader->setFloat("u_EditorExposure", editorExposure);
             shader->setVec3("u_ViewPos", &cameraPosition.x);
 
             shader->setMat4("u_Model", glm::value_ptr(instance.transform));
             shader->setVec3("u_SelectionColor", &selectedHighlightColor.x);
-            shader->setFloat("u_SelectionMix", instance.selected ? 0.38f : 0.0f);
+            shader->setFloat("u_SelectionMix", (sceneEditorView && instance.selected) ? 0.38f : 0.0f);
             model->draw(*shader);
         }
     }
 
     static void rebuildFrameBufferAttachments() {
-        VALKRON_CORE_ASSERT(s_data.frameTexture != nullptr, "Frame texture must exist before rebuilding attachments");
-        VALKRON_CORE_ASSERT(s_data.depthBuffer != nullptr, "Depth buffer must exist before rebuilding attachments");
+        VALKRON_CORE_ASSERT(s_data.frameTexture != nullptr, "Game frame texture must exist before rebuilding attachments");
+        VALKRON_CORE_ASSERT(s_data.depthBuffer != nullptr, "Game depth buffer must exist before rebuilding attachments");
+        VALKRON_CORE_ASSERT(s_data.sceneFrameTexture != nullptr, "Scene frame texture must exist before rebuilding attachments");
+        VALKRON_CORE_ASSERT(s_data.sceneDepthBuffer != nullptr, "Scene depth buffer must exist before rebuilding attachments");
 
-        if (!s_data.frameBuffer || s_data.viewportWidth <= 0 || s_data.viewportHeight <= 0) {
+        if (!s_data.frameBuffer || !s_data.sceneFrameBuffer || s_data.viewportWidth <= 0 || s_data.viewportHeight <= 0) {
             return;
         }
 
         s_data.frameTexture->createEmpty(s_data.viewportWidth, s_data.viewportHeight, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE);
         s_data.depthBuffer->allocateStorage(s_data.viewportWidth, s_data.viewportHeight);
+
+        s_data.sceneFrameTexture->createEmpty(s_data.viewportWidth, s_data.viewportHeight, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE);
+        s_data.sceneDepthBuffer->allocateStorage(s_data.viewportWidth, s_data.viewportHeight);
 
         s_data.frameBuffer->bind();
         s_data.frameBuffer->attachColorTexture(s_data.frameTexture->getID());
@@ -201,6 +229,15 @@ namespace Valkron {
             VALKRON_CORE_ASSERT(false, "Framebuffer is incomplete after attachment rebuild");
         }
         s_data.frameBuffer->unbind();
+
+        s_data.sceneFrameBuffer->bind();
+        s_data.sceneFrameBuffer->attachColorTexture(s_data.sceneFrameTexture->getID());
+        s_data.sceneFrameBuffer->attachDepthBuffer(s_data.sceneDepthBuffer->getID());
+        if (!s_data.sceneFrameBuffer->isComplete()) {
+            LOG_ERROR("Scene preview FrameBuffer is not complete after resize/update");
+            VALKRON_CORE_ASSERT(false, "Scene preview framebuffer is incomplete after attachment rebuild");
+        }
+        s_data.sceneFrameBuffer->unbind();
     }
 
     void Renderer::init(GLFWwindow* window) {
@@ -225,13 +262,22 @@ namespace Valkron {
         s_data.frameTexture = std::make_unique<Texture>();
         s_data.depthBuffer = std::make_unique<DepthBuffer>();
 
+        s_data.sceneFrameBuffer = std::make_unique<FrameBuffer>();
+        s_data.sceneFrameTexture = std::make_unique<Texture>();
+        s_data.sceneDepthBuffer = std::make_unique<DepthBuffer>();
+
         VALKRON_CORE_ASSERT(s_data.frameBuffer != nullptr, "Failed to create FrameBuffer");
         VALKRON_CORE_ASSERT(s_data.frameTexture != nullptr, "Failed to create frame texture");
         VALKRON_CORE_ASSERT(s_data.depthBuffer != nullptr, "Failed to create depth buffer");
+        VALKRON_CORE_ASSERT(s_data.sceneFrameBuffer != nullptr, "Failed to create Scene FrameBuffer");
+        VALKRON_CORE_ASSERT(s_data.sceneFrameTexture != nullptr, "Failed to create scene frame texture");
+        VALKRON_CORE_ASSERT(s_data.sceneDepthBuffer != nullptr, "Failed to create scene depth buffer");
 
         IMGUI_CHECKVERSION();
         ImGui::CreateContext();
         ImGuiIO& io = ImGui::GetIO();
+        s_data.imguiIniPath = (FileSystem::getExecutableDirectory() / "imgui.ini").string();
+        io.IniFilename = s_data.imguiIniPath.c_str();
         io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
         applyRetroImGuiStyle();
 
@@ -256,6 +302,9 @@ namespace Valkron {
         s_data.depthBuffer.reset();
         s_data.frameTexture.reset();
         s_data.frameBuffer.reset();
+        s_data.sceneDepthBuffer.reset();
+        s_data.sceneFrameTexture.reset();
+        s_data.sceneFrameBuffer.reset();
         s_data.camera.reset();
         s_data.modelMatrix = glm::mat4(1.0f);
         s_data.sceneModelInstances.clear();
@@ -266,6 +315,7 @@ namespace Valkron {
         s_data.viewportHeight = 0;
         s_data.windowFramebufferWidth = 0;
         s_data.windowFramebufferHeight = 0;
+        s_data.imguiIniPath.clear();
         s_data.window = nullptr;
         s_data.initialized = false;
     }
@@ -280,13 +330,17 @@ namespace Valkron {
 
         VALKRON_CORE_ASSERT(s_data.frameBuffer != nullptr, "FrameBuffer is not initialized");
 
-        s_data.frameBuffer->bind();
-        RenderCommand::setViewport(0, 0, s_data.viewportWidth, s_data.viewportHeight);
-        glEnable(GL_DEPTH_TEST);
-        glClearColor(0.13f, 0.14f, 0.19f, 1.0f);
-        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+        const auto renderToBuffer = [&](FrameBuffer& frameBuffer, RenderViewMode viewMode, const glm::vec3& clearColor) {
+            frameBuffer.bind();
+            RenderCommand::setViewport(0, 0, s_data.viewportWidth, s_data.viewportHeight);
+            glEnable(GL_DEPTH_TEST);
+            glClearColor(clearColor.x, clearColor.y, clearColor.z, 1.0f);
+            glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+            renderLoadedAssets(viewMode);
+        };
 
-        renderLoadedAssets();
+        renderToBuffer(*s_data.sceneFrameBuffer, RenderViewMode::SceneEditor, glm::vec3(0.17f, 0.18f, 0.22f));
+        renderToBuffer(*s_data.frameBuffer, RenderViewMode::Game, glm::vec3(0.12f, 0.13f, 0.17f));
 
         ImGui_ImplOpenGL3_NewFrame();
         ImGui_ImplGlfw_NewFrame();
@@ -379,6 +433,24 @@ namespace Valkron {
         s_data.lightEntityPositions = lightPositions;
     }
 
+    void Renderer::setDirectionalLight(const glm::vec3& direction, const glm::vec3& color, float intensity, float ambientStrength) {
+        if (!s_data.initialized) {
+            return;
+        }
+
+        if (glm::length(direction) > 0.0001f) {
+            s_data.directionalLightDirection = glm::normalize(direction);
+        }
+
+        s_data.directionalLightColor = glm::vec3(
+            std::max(0.0f, color.x),
+            std::max(0.0f, color.y),
+            std::max(0.0f, color.z)
+        );
+        s_data.directionalLightIntensity = std::max(0.01f, intensity);
+        s_data.directionalLightAmbientStrength = std::clamp(ambientStrength, 0.01f, 1.00f);
+    }
+
     glm::vec3 Renderer::getCameraPosition() {
         if (!s_data.initialized || s_data.camera == nullptr) {
             return glm::vec3(0.0f, 0.0f, 2.0f);
@@ -459,6 +531,18 @@ namespace Valkron {
     }
 
     unsigned int Renderer::getFrameTextureID() {
+        return getGameFrameTextureID();
+    }
+
+    unsigned int Renderer::getSceneFrameTextureID() {
+        if (!s_data.initialized || s_data.sceneFrameTexture == nullptr) {
+            return 0;
+        }
+
+        return s_data.sceneFrameTexture->getID();
+    }
+
+    unsigned int Renderer::getGameFrameTextureID() {
         if (!s_data.initialized || s_data.frameTexture == nullptr) {
             return 0;
         }

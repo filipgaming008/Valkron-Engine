@@ -20,74 +20,9 @@ namespace Valkron {
 
         const auto& entities = m_activeScene.getEntityData();
         const bool hasSelectedEntity = m_selectedEntityIndex >= 0 && m_selectedEntityIndex < static_cast<int>(entities.size());
+        std::optional<SceneEntityType> pendingCreateEntityFromSceneContext;
 
-            ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 4.0f);
-            ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 2.0f);
-            ImGui::PushStyleColor(ImGuiCol_ChildBg, IM_COL32(19, 21, 24, 230));
-            ImGui::PushStyleColor(ImGuiCol_Border, IM_COL32(130, 40, 40, 135));
-            if (ImGui::BeginChild("SceneViewHeaderStrip", ImVec2(0.0f, 72.0f), true, ImGuiWindowFlags_NoScrollbar)) {
-                const float frameMs = deltaTime * 1000.0f;
-                const float fps = deltaTime > 0.0f ? (1.0f / deltaTime) : 0.0f;
-
-                ImGui::TextUnformatted("Scene Renderer | Edit");
-                ImGui::Separator();
-                ImGui::Text("Frame %.2f ms  FPS %.1f  Viewport %dx%d", frameMs, fps, Renderer::getViewportWidth(), Renderer::getViewportHeight());
-            }
-            ImGui::EndChild();
-            ImGui::PopStyleColor(2);
-            ImGui::PopStyleVar(2);
-
-            ImGui::Text("Selected Entity: %s", hasSelectedEntity ? entities[static_cast<std::size_t>(m_selectedEntityIndex)].name.c_str() : "None");
-
-            ImGui::PushStyleColor(ImGuiCol_ChildBg, IM_COL32(20, 22, 25, 220));
-            ImGui::PushStyleColor(ImGuiCol_Border, IM_COL32(122, 36, 36, 120));
-            if (ImGui::BeginChild("SceneViewControlStrip", ImVec2(0.0f, 42.0f), true, ImGuiWindowFlags_NoScrollbar)) {
-                ImGui::SetNextItemWidth(190.0f);
-                if (ImGui::BeginCombo("##SceneSelection", hasSelectedEntity ? entities[static_cast<std::size_t>(m_selectedEntityIndex)].name.c_str() : "None")) {
-                    if (ImGui::Selectable("None", !hasSelectedEntity)) {
-                        clearEntitySelection();
-                    }
-
-                    for (std::size_t i = 0; i < entities.size(); ++i) {
-                        const bool selected = static_cast<int>(i) == m_selectedEntityIndex;
-                        if (ImGui::Selectable(entities[i].name.c_str(), selected)) {
-                            setSelectedEntity(static_cast<int>(i));
-                        }
-
-                        if (selected) {
-                            ImGui::SetItemDefaultFocus();
-                        }
-                    }
-
-                    ImGui::EndCombo();
-                }
-
-                ImGui::SameLine();
-                if (ImGui::Button("Deselect##SceneViewSelection")) {
-                    clearEntitySelection();
-                }
-
-                ImGui::SameLine();
-                ImGui::Checkbox("Grid", &m_showSceneGrid);
-                ImGui::SameLine();
-                if (ImGui::RadioButton("T", m_gizmoOperationIndex == 0)) {
-                    m_gizmoOperationIndex = 0;
-                }
-                ImGui::SameLine();
-                if (ImGui::RadioButton("R", m_gizmoOperationIndex == 1)) {
-                    m_gizmoOperationIndex = 1;
-                }
-                ImGui::SameLine();
-                if (ImGui::RadioButton("S", m_gizmoOperationIndex == 2)) {
-                    m_gizmoOperationIndex = 2;
-                }
-                ImGui::SameLine();
-                ImGui::Checkbox("World", &m_gizmoWorldMode);
-                ImGui::SameLine();
-                ImGui::Checkbox("Snap", &m_gizmoSnapEnabled);
-            }
-            ImGui::EndChild();
-            ImGui::PopStyleColor(2);
+        ImGui::TextDisabled("Scene: %s", m_activeScene.getName().c_str());
 
         m_gizmoTranslateSnap = std::max(0.01f, m_gizmoTranslateSnap);
         m_gizmoRotateSnapDegrees = std::max(0.25f, m_gizmoRotateSnapDegrees);
@@ -123,11 +58,9 @@ namespace Valkron {
             }
         }
 
-        const unsigned int frameTextureID = Renderer::getFrameTextureID();
+        const unsigned int frameTextureID = Renderer::getSceneFrameTextureID();
         const int renderWidth = Renderer::getViewportWidth();
         const int renderHeight = Renderer::getViewportHeight();
-
-        ImGui::Text("Render Target: %dx%d", renderWidth, renderHeight);
 
         if (frameTextureID == 0 || renderWidth <= 0 || renderHeight <= 0 || availableRegion.x <= 2.0f || availableRegion.y <= 2.0f) {
             m_sceneViewImageHovered = false;
@@ -160,8 +93,11 @@ namespace Valkron {
 
         const ImVec2 imageRectMin = ImGui::GetItemRectMin();
         const ImVec2 imageRectMax = ImGui::GetItemRectMax();
-        const bool imageClicked = ImGui::IsItemClicked(ImGuiMouseButton_Left);
+        bool imageClicked = ImGui::IsItemClicked(ImGuiMouseButton_Left);
         m_sceneViewImageHovered = ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenBlockedByPopup);
+
+        const float gizmoInset = 94.0f;
+        const ImVec2 gizmoPos(imageRectMax.x - gizmoInset, imageRectMin.y + 41.0f);
 
         {
             ImViewGuizmo::BeginFrame();
@@ -173,8 +109,6 @@ namespace Valkron {
             viewGizmoStyle.toolButtonRadius = 18.0f;
             viewGizmoStyle.labelSize = 0.90f;
 
-            const float gizmoInset = 94.0f;
-            const ImVec2 gizmoPos(imageRectMax.x - gizmoInset, imageRectMin.y + 14.0f);
             const glm::vec3 cameraPos = Renderer::getCameraPosition();
             const glm::vec3 pivot = Renderer::getCameraTarget();
             const glm::vec3 toCamera = cameraPos - pivot;
@@ -213,6 +147,128 @@ namespace Valkron {
             if (ImGui::IsKeyPressed(ImGuiKey_R, false)) {
                 m_gizmoOperationIndex = 2;
             }
+        }
+
+        bool gizmoToolsHovered = false;
+        {
+            const float toolsRightMargin = 8.0f;
+            const float desiredToolsY = gizmoPos.y + 154.0f;
+            const float minToolsY = imageRectMin.y + 62.0f;
+            const float maxToolsY = std::max(minToolsY, imageRectMax.y - 220.0f);
+            const float toolsWindowY = std::clamp(desiredToolsY, minToolsY, maxToolsY);
+            const ImVec2 toolsWindowPos(imageRectMax.x - toolsRightMargin, toolsWindowY);
+            ImGui::SetNextWindowPos(toolsWindowPos, ImGuiCond_Always, ImVec2(1.0f, 0.0f));
+            ImGui::SetNextWindowBgAlpha(0.92f);
+
+            const ImGuiWindowFlags toolsWindowFlags =
+                ImGuiWindowFlags_NoDecoration |
+                ImGuiWindowFlags_NoMove |
+                ImGuiWindowFlags_NoSavedSettings |
+                ImGuiWindowFlags_NoDocking |
+                ImGuiWindowFlags_NoFocusOnAppearing |
+                ImGuiWindowFlags_NoNav |
+                ImGuiWindowFlags_AlwaysAutoResize;
+
+            ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 7.0f);
+            ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 1.0f);
+            ImGui::PushStyleColor(ImGuiCol_WindowBg, IM_COL32(22, 25, 30, 235));
+            ImGui::PushStyleColor(ImGuiCol_Border, IM_COL32(118, 122, 132, 205));
+
+            if (ImGui::Begin("##SceneViewTransformTools", nullptr, toolsWindowFlags)) {
+                ImGui::TextUnformatted("Transform");
+                ImGui::Separator();
+
+                if (ImGui::RadioButton("Translate (W)", m_gizmoOperationIndex == 0)) {
+                    m_gizmoOperationIndex = 0;
+                }
+                if (ImGui::RadioButton("Rotate (E)", m_gizmoOperationIndex == 1)) {
+                    m_gizmoOperationIndex = 1;
+                }
+                if (ImGui::RadioButton("Scale (R)", m_gizmoOperationIndex == 2)) {
+                    m_gizmoOperationIndex = 2;
+                }
+
+                ImGui::Separator();
+                ImGui::Checkbox("Grid", &m_showSceneGrid);
+                ImGui::Checkbox("World Space", &m_gizmoWorldMode);
+                ImGui::Checkbox("Snap", &m_gizmoSnapEnabled);
+
+                if (m_gizmoSnapEnabled) {
+                    if (m_gizmoOperationIndex == 1) {
+                        ImGui::SetNextItemWidth(120.0f);
+                        ImGui::DragFloat("Degrees", &m_gizmoRotateSnapDegrees, 0.25f, 0.25f, 90.0f, "%.1f");
+                    } else if (m_gizmoOperationIndex == 2) {
+                        ImGui::SetNextItemWidth(120.0f);
+                        ImGui::DragFloat("Scale Step", &m_gizmoScaleSnap, 0.01f, 0.01f, 10.0f, "%.2f");
+                    } else {
+                        ImGui::SetNextItemWidth(120.0f);
+                        ImGui::DragFloat("Move Step", &m_gizmoTranslateSnap, 0.01f, 0.01f, 10.0f, "%.2f");
+                    }
+                }
+
+                if (hasSelectedEntity) {
+                    ImGui::Separator();
+                    ImGui::TextDisabled("Selected: %s", entities[static_cast<std::size_t>(m_selectedEntityIndex)].name.c_str());
+                }
+
+                gizmoToolsHovered = ImGui::IsWindowHovered(ImGuiHoveredFlags_AllowWhenBlockedByPopup);
+            }
+            ImGui::End();
+
+            ImGui::PopStyleColor(2);
+            ImGui::PopStyleVar(2);
+        }
+
+        if (gizmoToolsHovered) {
+            m_sceneViewImageHovered = false;
+            imageClicked = false;
+        }
+
+        if (m_sceneViewImageHovered && m_sceneViewOptionsPopupEnabled && ImGui::IsMouseReleased(ImGuiMouseButton_Right) && !ImGui::GetIO().KeyCtrl) {
+            ImGui::OpenPopup("SceneView.ContextMenu");
+        }
+
+        if (ImGui::BeginPopup("SceneView.ContextMenu")) {
+            ImGui::TextDisabled("Add Entity");
+            if (ImGui::MenuItem("Empty Entity")) {
+                pendingCreateEntityFromSceneContext = SceneEntityType::Generic;
+            }
+            if (ImGui::MenuItem("Camera Entity")) {
+                pendingCreateEntityFromSceneContext = SceneEntityType::Camera;
+            }
+            if (ImGui::MenuItem("Light Entity")) {
+                pendingCreateEntityFromSceneContext = SceneEntityType::Light;
+            }
+            ImGui::Separator();
+            ImGui::TextDisabled("Camera: MMB orbit, wheel zoom, Ctrl+RMB pan");
+            ImGui::EndPopup();
+        }
+
+        if (pendingCreateEntityFromSceneContext.has_value()) {
+            const SceneEntityType entityType = pendingCreateEntityFromSceneContext.value();
+            std::string baseEntityName = "Entity";
+            if (entityType == SceneEntityType::Camera) {
+                baseEntityName = "Camera";
+            } else if (entityType == SceneEntityType::Light) {
+                baseEntityName = "Light";
+            }
+
+            const std::string entityName = m_activeScene.makeUniqueEntityName(baseEntityName);
+            m_activeScene.addEntity(entityName, entityType);
+
+            if (const std::optional<std::size_t> entityIndex = m_activeScene.findEntityIndex(entityName); entityIndex.has_value()) {
+                if (SceneEntity* entity = m_activeScene.getEntityByIndex(entityIndex.value()); entity != nullptr) {
+                    entity->transform.position = m_runtimeEntityCameraActive ? Renderer::getCameraTarget() : m_sceneCameraPivot;
+                }
+
+                if (entityType == SceneEntityType::Camera && m_activeScene.getGameStateValue("PrimaryCameraEntity").value_or("").empty()) {
+                    m_activeScene.setGameStateValue("PrimaryCameraEntity", entityName);
+                }
+
+                setSelectedEntity(static_cast<int>(entityIndex.value()));
+            }
+
+            appendTerminalLine("Created " + entityName + " from Scene View context menu.");
         }
 
         if (ImGui::BeginDragDropTarget()) {
@@ -513,22 +569,46 @@ namespace Valkron {
 
                     for (std::size_t entityIndex = 0; entityIndex < currentEntities.size(); ++entityIndex) {
                         const glm::mat4 worldTransform = composeEntityWorldTransformMatrix(currentEntities, entityIndex);
-                        const glm::vec3 entityCenter = extractWorldPosition(worldTransform);
+                        std::optional<float> hitDistance;
 
-                        const SceneTransform& transform = currentEntities[entityIndex].transform;
-                        const glm::vec3 extents(
-                            std::max(0.05f, std::abs(transform.size.x * transform.scale.x)),
-                            std::max(0.05f, std::abs(transform.size.y * transform.scale.y)),
-                            std::max(0.05f, std::abs(transform.size.z * transform.scale.z))
-                        );
-                        const float sphereRadius = std::max(0.2f, 0.5f * std::max({extents.x, extents.y, extents.z}));
+                        const SceneEntity& entity = currentEntities[entityIndex];
+                        if (!entity.modelAssetName.empty()) {
+                            const std::shared_ptr<Model> model = AssetLoader::getModel(entity.modelAssetName);
+                            if (model != nullptr && model->isLoaded()) {
+                                glm::vec3 localBoundsMin;
+                                glm::vec3 localBoundsMax;
+                                if (model->getLocalBounds(localBoundsMin, localBoundsMax)) {
+                                    const glm::mat4 inverseWorldTransform = glm::inverse(worldTransform);
+                                    const glm::vec3 localRayOrigin = glm::vec3(inverseWorldTransform * glm::vec4(rayOrigin, 1.0f));
+                                    glm::vec3 localRayDirection = glm::vec3(inverseWorldTransform * glm::vec4(rayDirection, 0.0f));
 
-                        const std::optional<float> hitDistance = raySphereIntersectionDistance(rayOrigin, rayDirection, entityCenter, sphereRadius);
-                        if (!hitDistance.has_value()) {
-                            continue;
+                                    if (glm::length(localRayDirection) > 0.0001f) {
+                                        localRayDirection = glm::normalize(localRayDirection);
+                                        const std::optional<float> localHitDistance = rayAabbIntersectionDistance(localRayOrigin, localRayDirection, localBoundsMin, localBoundsMax);
+                                        if (localHitDistance.has_value()) {
+                                            const glm::vec3 localHitPosition = localRayOrigin + localRayDirection * localHitDistance.value();
+                                            const glm::vec3 worldHitPosition = glm::vec3(worldTransform * glm::vec4(localHitPosition, 1.0f));
+                                            hitDistance = glm::length(worldHitPosition - rayOrigin);
+                                        }
+                                    }
+                                }
+                            }
                         }
 
-                        if (hitDistance.value() < nearestDistance) {
+                        if (!hitDistance.has_value()) {
+                            const glm::vec3 entityCenter = extractWorldPosition(worldTransform);
+
+                            const SceneTransform& transform = entity.transform;
+                            const glm::vec3 extents(
+                                std::max(0.05f, std::abs(transform.size.x * transform.scale.x)),
+                                std::max(0.05f, std::abs(transform.size.y * transform.scale.y)),
+                                std::max(0.05f, std::abs(transform.size.z * transform.scale.z))
+                            );
+                            const float sphereRadius = std::max(0.2f, 0.5f * std::max({extents.x, extents.y, extents.z}));
+                            hitDistance = raySphereIntersectionDistance(rayOrigin, rayDirection, entityCenter, sphereRadius);
+                        }
+
+                        if (hitDistance.has_value() && hitDistance.value() < nearestDistance) {
                             nearestDistance = hitDistance.value();
                             pickedEntityIndex = static_cast<int>(entityIndex);
                         }
@@ -555,7 +635,7 @@ namespace Valkron {
         if (m_runtimeEntityCameraActive) {
             ImGui::TextDisabled("Runtime camera entity drives view (Play mode).");
         } else {
-            ImGui::TextDisabled("MMB: Orbit  |  Wheel: Zoom  |  Ctrl+RMB: Pan  |  RMB: Options");
+            ImGui::TextDisabled("MMB: Orbit  |  Wheel: Zoom  |  Ctrl+RMB: Pan  |  RMB: Context Menu");
         }
 
         ImGui::End();

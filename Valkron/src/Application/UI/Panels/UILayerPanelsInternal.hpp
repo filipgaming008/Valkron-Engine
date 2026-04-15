@@ -82,6 +82,12 @@ namespace Valkron {
         float spacing
     );
     bool drawColoredVec3Control(const char* label, glm::vec3& value, float speed, bool hasLimits, float minValue, float maxValue);
+    std::optional<float> rayAabbIntersectionDistance(
+        const glm::vec3& rayOrigin,
+        const glm::vec3& rayDirection,
+        const glm::vec3& boundsMin,
+        const glm::vec3& boundsMax
+    );
     std::optional<float> raySphereIntersectionDistance(
         const glm::vec3& rayOrigin,
         const glm::vec3& rayDirection,

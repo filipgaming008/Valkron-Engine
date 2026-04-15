@@ -20,6 +20,47 @@ namespace Valkron {
         ImGui::Text("Entities: %d", static_cast<int>(entities.size()));
         ImGui::Text("Assets: %d", static_cast<int>(m_activeScene.getAssets().size()));
 
+        std::vector<std::size_t> cameraEntityIndices;
+        cameraEntityIndices.reserve(entities.size());
+        for (std::size_t i = 0; i < entities.size(); ++i) {
+            if (entities[i].type == SceneEntityType::Camera) {
+                cameraEntityIndices.push_back(i);
+            }
+        }
+
+        std::string primaryPlayCameraName = m_activeScene.getGameStateValue("PrimaryCameraEntity").value_or("");
+        const bool hasStoredPrimaryCamera = std::any_of(cameraEntityIndices.begin(), cameraEntityIndices.end(), [&](std::size_t entityIndex) {
+            return entities[entityIndex].name == primaryPlayCameraName;
+        });
+
+        if (!cameraEntityIndices.empty() && !hasStoredPrimaryCamera) {
+            primaryPlayCameraName = entities[cameraEntityIndices.front()].name;
+            m_activeScene.setGameStateValue("PrimaryCameraEntity", primaryPlayCameraName);
+        }
+
+        const char* playCameraPreview = primaryPlayCameraName.empty() ? "None" : primaryPlayCameraName.c_str();
+        if (ImGui::BeginCombo("Main Play Camera", playCameraPreview)) {
+            const bool noneSelected = primaryPlayCameraName.empty();
+            if (ImGui::Selectable("None", noneSelected)) {
+                m_activeScene.setGameStateValue("PrimaryCameraEntity", "");
+                appendTerminalLine("Main play camera cleared.");
+            }
+
+            for (std::size_t cameraEntityIndex : cameraEntityIndices) {
+                const bool selectedCamera = entities[cameraEntityIndex].name == primaryPlayCameraName;
+                if (ImGui::Selectable(entities[cameraEntityIndex].name.c_str(), selectedCamera)) {
+                    m_activeScene.setGameStateValue("PrimaryCameraEntity", entities[cameraEntityIndex].name);
+                    appendTerminalLine(entities[cameraEntityIndex].name + " selected as main play camera.");
+                }
+
+                if (selectedCamera) {
+                    ImGui::SetItemDefaultFocus();
+                }
+            }
+
+            ImGui::EndCombo();
+        }
+
         if (!hasSelection) {
             ImGui::Spacing();
             ImGui::Separator();
@@ -63,6 +104,12 @@ namespace Valkron {
                 if (m_activeScene.renameEntity(oldName, appliedName)) {
                     appendTerminalLine("Renamed entity " + oldName + " to " + appliedName + ".");
                     m_activeScene.setGameStateValue("SelectedEntity", appliedName);
+
+                    const std::string primaryCameraName = m_activeScene.getGameStateValue("PrimaryCameraEntity").value_or("");
+                    if (!primaryCameraName.empty() && primaryCameraName == oldName) {
+                        m_activeScene.setGameStateValue("PrimaryCameraEntity", appliedName);
+                    }
+
                     std::fill(m_selectedEntityNameBuffer.begin(), m_selectedEntityNameBuffer.end(), '\0');
                     std::snprintf(m_selectedEntityNameBuffer.data(), m_selectedEntityNameBuffer.size(), "%s", appliedName.c_str());
                 }
@@ -94,10 +141,25 @@ namespace Valkron {
                 const bool selectedType = selectedEntity->type == typeOption;
                 const char* typeLabel = getSceneEntityTypeDisplayName(typeOption);
                 if (ImGui::Selectable(typeLabel, selectedType)) {
+                    const bool wasPrimaryPlayCamera = m_activeScene.getGameStateValue("PrimaryCameraEntity").value_or("") == selectedEntity->name;
                     selectedEntity->type = typeOption;
                     if (selectedEntity->type != SceneEntityType::Generic && !selectedEntity->modelAssetName.empty()) {
                         selectedEntity->modelAssetName.clear();
                     }
+
+                    if (wasPrimaryPlayCamera && selectedEntity->type != SceneEntityType::Camera) {
+                        std::string fallbackCameraName;
+                        const auto& allEntities = m_activeScene.getEntityData();
+                        for (const SceneEntity& entityOption : allEntities) {
+                            if (entityOption.type == SceneEntityType::Camera) {
+                                fallbackCameraName = entityOption.name;
+                                break;
+                            }
+                        }
+
+                        m_activeScene.setGameStateValue("PrimaryCameraEntity", fallbackCameraName);
+                    }
+
                     appendTerminalLine("Set entity type for " + selectedEntity->name + " to " + std::string(typeLabel) + ".");
                 }
 
@@ -107,6 +169,18 @@ namespace Valkron {
             }
 
             ImGui::EndCombo();
+        }
+
+        if (selectedEntity->type == SceneEntityType::Camera) {
+            const bool isMainPlayCamera = m_activeScene.getGameStateValue("PrimaryCameraEntity").value_or("") == selectedEntity->name;
+            if (!isMainPlayCamera) {
+                if (ImGui::Button("Set As Main Camera")) {
+                    m_activeScene.setGameStateValue("PrimaryCameraEntity", selectedEntity->name);
+                    appendTerminalLine(selectedEntity->name + " selected as main play camera.");
+                }
+            } else {
+                ImGui::TextDisabled("This camera is assigned as the main play camera.");
+            }
         }
 
         const bool supportsModelBinding = selectedEntity->type == SceneEntityType::Generic;

@@ -232,6 +232,27 @@ namespace Valkron {
         return entity.type == SceneEntityType::Light;
     }
 
+    std::optional<std::size_t> resolvePrimaryPlayCameraEntityIndex(const Scene& scene) {
+        const std::vector<SceneEntity>& entities = scene.getEntityData();
+        const std::optional<std::string> preferredCameraName = scene.getGameStateValue("PrimaryCameraEntity");
+
+        if (preferredCameraName.has_value() && !preferredCameraName->empty()) {
+            for (std::size_t i = 0; i < entities.size(); ++i) {
+                if (isCameraEntity(entities[i]) && entities[i].name == preferredCameraName.value()) {
+                    return i;
+                }
+            }
+        }
+
+        for (std::size_t i = 0; i < entities.size(); ++i) {
+            if (isCameraEntity(entities[i])) {
+                return i;
+            }
+        }
+
+        return std::nullopt;
+    }
+
     const char* getSceneEntityTypeDisplayName(SceneEntityType type) {
         switch (type) {
             case SceneEntityType::Camera:
@@ -790,6 +811,51 @@ namespace Valkron {
         return changed;
     }
 
+    std::optional<float> rayAabbIntersectionDistance(
+        const glm::vec3& rayOrigin,
+        const glm::vec3& rayDirection,
+        const glm::vec3& boundsMin,
+        const glm::vec3& boundsMax
+    ) {
+        constexpr float kParallelEpsilon = 0.000001f;
+
+        float tMin = 0.0f;
+        float tMax = std::numeric_limits<float>::max();
+
+        auto testAxis = [&](float origin, float direction, float minBound, float maxBound) {
+            if (std::abs(direction) < kParallelEpsilon) {
+                return origin >= minBound && origin <= maxBound;
+            }
+
+            const float inverseDirection = 1.0f / direction;
+            float t0 = (minBound - origin) * inverseDirection;
+            float t1 = (maxBound - origin) * inverseDirection;
+            if (t0 > t1) {
+                std::swap(t0, t1);
+            }
+
+            tMin = std::max(tMin, t0);
+            tMax = std::min(tMax, t1);
+            return tMax >= tMin;
+        };
+
+        if (!testAxis(rayOrigin.x, rayDirection.x, boundsMin.x, boundsMax.x)) {
+            return std::nullopt;
+        }
+        if (!testAxis(rayOrigin.y, rayDirection.y, boundsMin.y, boundsMax.y)) {
+            return std::nullopt;
+        }
+        if (!testAxis(rayOrigin.z, rayDirection.z, boundsMin.z, boundsMax.z)) {
+            return std::nullopt;
+        }
+
+        if (tMax < 0.0f) {
+            return std::nullopt;
+        }
+
+        return tMin >= 0.0f ? tMin : tMax;
+    }
+
     std::optional<float> raySphereIntersectionDistance(
         const glm::vec3& rayOrigin,
         const glm::vec3& rayDirection,
@@ -840,6 +906,35 @@ namespace Valkron {
         m_selectedEntityIndex = -1;
         m_selectedEntityNameBufferEntityIndex = -1;
         m_activeScene.setGameStateValue("SelectedEntity", "None");
+    }
+
+    void UILayer::syncActiveSceneToLibrary() {
+        if (m_activeSceneLibraryIndex < 0) {
+            return;
+        }
+
+        const std::size_t sceneIndex = static_cast<std::size_t>(m_activeSceneLibraryIndex);
+        if (sceneIndex >= m_editorScenes.size()) {
+            return;
+        }
+
+        m_editorScenes[sceneIndex] = m_activeScene;
+    }
+
+    bool UILayer::switchToSceneByIndex(std::size_t sceneIndex) {
+        if (sceneIndex >= m_editorScenes.size()) {
+            return false;
+        }
+
+        syncActiveSceneToLibrary();
+
+        m_activeSceneLibraryIndex = static_cast<int>(sceneIndex);
+        m_activeScene = m_editorScenes[sceneIndex];
+        clearEntitySelection();
+        m_sceneCameraControllerInitialized = false;
+
+        appendTerminalLine("Switched to scene " + m_activeScene.getName() + ".");
+        return true;
     }
 
     void UILayer::openAssetImportBrowser(RuntimeImportMode mode, const char* title) {
@@ -984,56 +1079,72 @@ namespace Valkron {
     }
 
     void UILayer::onAttach() {
-        m_activeScene = Scene("Sandbox Scene");
+        auto buildEditorScene = [](const std::string& sceneName, const std::string& subjectName, const glm::vec3& subjectPosition, const glm::vec3& subjectScale) {
+            Scene scene(sceneName);
 
-        m_activeScene.addEntity("Camera", SceneEntityType::Camera);
-        m_activeScene.addEntity("Directional Light", SceneEntityType::Light);
-        m_activeScene.addEntity("Cube", SceneEntityType::Generic);
+            scene.addEntity("Camera", SceneEntityType::Camera);
+            scene.addEntity("Directional Light", SceneEntityType::Light);
+            scene.addEntity(subjectName, SceneEntityType::Generic);
 
-        if (const std::optional<std::size_t> cameraEntityIndex = m_activeScene.findEntityIndex("Camera"); cameraEntityIndex.has_value()) {
-            if (SceneEntity* cameraEntity = m_activeScene.getEntityByIndex(cameraEntityIndex.value()); cameraEntity != nullptr) {
-                cameraEntity->transform.position = glm::vec3(0.0f, 1.6f, 4.0f);
-                cameraEntity->transform.rotation = glm::vec3(-12.0f, 0.0f, 0.0f);
+            if (const std::optional<std::size_t> cameraEntityIndex = scene.findEntityIndex("Camera"); cameraEntityIndex.has_value()) {
+                if (SceneEntity* cameraEntity = scene.getEntityByIndex(cameraEntityIndex.value()); cameraEntity != nullptr) {
+                    cameraEntity->transform.position = glm::vec3(0.0f, 1.6f, 4.0f);
+                    cameraEntity->transform.rotation = glm::vec3(-12.0f, 0.0f, 0.0f);
+                }
             }
-        }
 
-        if (const std::optional<std::size_t> lightEntityIndex = m_activeScene.findEntityIndex("Directional Light"); lightEntityIndex.has_value()) {
-            if (SceneEntity* lightEntity = m_activeScene.getEntityByIndex(lightEntityIndex.value()); lightEntity != nullptr) {
-                lightEntity->transform.position = glm::vec3(3.0f, 4.0f, 3.0f);
+            if (const std::optional<std::size_t> lightEntityIndex = scene.findEntityIndex("Directional Light"); lightEntityIndex.has_value()) {
+                if (SceneEntity* lightEntity = scene.getEntityByIndex(lightEntityIndex.value()); lightEntity != nullptr) {
+                    lightEntity->transform.position = glm::vec3(3.0f, 4.0f, 3.0f);
+                }
             }
-        }
 
-        if (const std::optional<std::size_t> cubeEntityIndex = m_activeScene.findEntityIndex("Cube"); cubeEntityIndex.has_value()) {
-            if (SceneEntity* cubeEntity = m_activeScene.getEntityByIndex(cubeEntityIndex.value()); cubeEntity != nullptr) {
-                cubeEntity->transform.position = glm::vec3(0.0f, 0.0f, 0.0f);
-                cubeEntity->transform.scale = glm::vec3(1.0f, 1.0f, 1.0f);
-                cubeEntity->transform.size = glm::vec3(1.0f, 1.0f, 1.0f);
-                cubeEntity->modelAssetName = "Test Model";
+            if (const std::optional<std::size_t> subjectEntityIndex = scene.findEntityIndex(subjectName); subjectEntityIndex.has_value()) {
+                if (SceneEntity* subjectEntity = scene.getEntityByIndex(subjectEntityIndex.value()); subjectEntity != nullptr) {
+                    subjectEntity->transform.position = subjectPosition;
+                    subjectEntity->transform.scale = subjectScale;
+                    subjectEntity->transform.size = glm::vec3(1.0f, 1.0f, 1.0f);
+                    subjectEntity->modelAssetName = "test_cube.obj";
+                }
             }
-        }
 
-        m_activeScene.addAsset("checker.ppm", "assets/textures/checker.ppm");
-        m_activeScene.addAsset("textured.vert", "assets/shaders/textured.vert");
-        m_activeScene.addAsset("textured.frag", "assets/shaders/textured.frag");
+            scene.addAsset("checker.ppm", "assets/textures/checker.ppm");
+            scene.addAsset("textured.vert", "assets/shaders/textured.vert");
+            scene.addAsset("textured.frag", "assets/shaders/textured.frag");
+            scene.addAsset("blinn_phong.vert", "assets/shaders/blinn_phong.vert");
+            scene.addAsset("blinn_phong.frag", "assets/shaders/blinn_phong.frag");
+            scene.addAsset("default_compute.comp", "assets/shaders/default_compute.comp");
+            scene.addAsset("test_cube.obj", "assets/models/test_cube.obj");
 
-        m_activeScene.addScript("SpinController", "scripts/SpinController.lua", true);
-        m_activeScene.addScript("CameraOrbit", "scripts/CameraOrbit.lua", false);
+            scene.addScript("SpinController", "scripts/SpinController.lua", true);
+            scene.addScript("CameraOrbit", "scripts/CameraOrbit.lua", false);
 
-        m_activeScene.addCamera("Editor Camera", CameraType::Perspective, true);
-        m_activeScene.addCamera("Ortho Debug Camera", CameraType::Orthographic, false);
+            scene.addCamera("Editor Camera", CameraType::Perspective, true);
+            scene.addCamera("Ortho Debug Camera", CameraType::Orthographic, false);
 
-        m_activeScene.setSetting("Renderer.VSync", "true");
-        m_activeScene.setSetting("Renderer.MSAA", "4");
-        m_activeScene.setSetting("Physics.Gravity", "0,-9.81,0");
+            scene.setSetting("Renderer.VSync", "true");
+            scene.setSetting("Renderer.MSAA", "4");
+            scene.setSetting("Physics.Gravity", "0,-9.81,0");
+            scene.setGameStateValue("Mode", "Edit");
+            scene.setGameStateValue("SelectedEntity", "None");
+            scene.setGameStateValue("PrimaryCameraEntity", "Camera");
 
-        m_activeScene.setGameStateValue("Mode", "Edit");
-        m_activeScene.setGameStateValue("SelectedEntity", "None");
+            return scene;
+        };
+
+        m_editorScenes.clear();
+        m_editorScenes.push_back(buildEditorScene("Sandbox Scene", "Cube", glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(1.0f, 1.0f, 1.0f)));
+        m_editorScenes.push_back(buildEditorScene("Lighting Study", "Statue", glm::vec3(-1.4f, 0.0f, 0.8f), glm::vec3(1.35f, 1.35f, 1.35f)));
+        m_editorScenes.push_back(buildEditorScene("Gameplay Blockout", "Crate", glm::vec3(1.7f, 0.0f, -1.2f), glm::vec3(0.85f, 0.85f, 0.85f)));
+
+        m_activeSceneLibraryIndex = 0;
+        m_activeScene = m_editorScenes[static_cast<std::size_t>(m_activeSceneLibraryIndex)];
 
         AssetLoader::initialize();
         AssetManager::setCachePath(AssetManager::getDefaultCachePath());
         AssetManager::loadSceneAssetCache(m_activeScene);
 
-        auto loadEntityIconTexture = [](const std::string& iconPath) -> std::shared_ptr<Texture> {
+        auto loadUiIconTexture = [](const std::string& iconPath) -> std::shared_ptr<Texture> {
             auto texture = std::make_shared<Texture>();
             if (!texture->loadTexture(iconPath, false)) {
                 return nullptr;
@@ -1042,8 +1153,10 @@ namespace Valkron {
             return texture;
         };
 
-        m_cameraEntityIconTexture = loadEntityIconTexture("assets/icons/camera.png");
-        m_lightEntityIconTexture = loadEntityIconTexture("assets/icons/light.png");
+        m_cameraEntityIconTexture = loadUiIconTexture("assets/icons/camera.png");
+        m_lightEntityIconTexture = loadUiIconTexture("assets/icons/light.png");
+        m_assetDirectoryIconTexture = loadUiIconTexture("assets/icons/directory.png");
+        m_assetImportIconTexture = loadUiIconTexture("assets/icons/import.png");
 
         const bool hasBlinnShaderAsset = std::any_of(
             m_activeScene.getAssets().begin(),
@@ -1074,6 +1187,9 @@ namespace Valkron {
         m_runtimeTexture3DDepth = std::max(1, m_runtimeTexture3DDepth);
         m_assetBrowserFolderFilter.clear();
         m_selectedAssetIndex = -1;
+        m_assetBrowserNavigationHistory.clear();
+        m_assetBrowserNavigationHistory.push_back(std::string{});
+        m_assetBrowserNavigationIndex = 0;
         m_assetImportBrowserOpen = false;
         m_assetImportBrowserRequestOpen = false;
         m_assetImportMode = RuntimeImportMode::Auto;
@@ -1132,6 +1248,8 @@ namespace Valkron {
 
         m_cameraEntityIconTexture.reset();
         m_lightEntityIconTexture.reset();
+        m_assetDirectoryIconTexture.reset();
+        m_assetImportIconTexture.reset();
         appendTerminalLine("UI Manager detached.");
         LOG_DEBUG("UILayer detached.");
     }
@@ -1164,17 +1282,38 @@ namespace Valkron {
         sceneModelInstances.reserve(entities.size());
         lightEntityPositions.reserve(entities.size());
 
+        const std::optional<std::size_t> primaryPlayCameraEntityIndex = resolvePrimaryPlayCameraEntityIndex(m_activeScene);
+        if (primaryPlayCameraEntityIndex.has_value() && primaryPlayCameraEntityIndex.value() < entities.size()) {
+            const std::string& resolvedCameraName = entities[primaryPlayCameraEntityIndex.value()].name;
+            if (m_activeScene.getGameStateValue("PrimaryCameraEntity").value_or("") != resolvedCameraName) {
+                m_activeScene.setGameStateValue("PrimaryCameraEntity", resolvedCameraName);
+            }
+        }
+
         std::optional<glm::mat4> runtimeCameraTransform;
+        std::optional<glm::vec3> directionalLightDirection;
         for (std::size_t entityIndex = 0; entityIndex < entities.size(); ++entityIndex) {
             const glm::mat4 worldTransform = composeEntityWorldTransformMatrix(entities, entityIndex);
             const bool cameraEntity = isCameraEntity(entities[entityIndex]);
             const bool lightEntity = isLightEntity(entities[entityIndex]);
 
             if (lightEntity) {
-                lightEntityPositions.push_back(extractWorldPosition(worldTransform));
+                const glm::vec3 lightPosition = extractWorldPosition(worldTransform);
+                lightEntityPositions.push_back(lightPosition);
+
+                if (!directionalLightDirection.has_value()) {
+                    glm::vec3 candidateDirection = extractForwardDirection(worldTransform);
+                    const SceneTransform& lightTransform = entities[entityIndex].transform;
+                    const bool hasExplicitRotation = glm::length(lightTransform.rotation) > 0.001f;
+                    if (!hasExplicitRotation && glm::length(lightPosition) > 0.001f) {
+                        candidateDirection = glm::normalize(-lightPosition);
+                    }
+
+                    directionalLightDirection = candidateDirection;
+                }
             }
 
-            if (!runtimeCameraTransform.has_value() && cameraEntity) {
+            if (cameraEntity && primaryPlayCameraEntityIndex.has_value() && entityIndex == primaryPlayCameraEntityIndex.value()) {
                 runtimeCameraTransform = worldTransform;
             }
 
@@ -1189,6 +1328,12 @@ namespace Valkron {
 
         Renderer::setSceneModelInstances(sceneModelInstances);
         Renderer::setLightEntityPositions(lightEntityPositions);
+
+        if (directionalLightDirection.has_value()) {
+            Renderer::setDirectionalLight(directionalLightDirection.value(), glm::vec3(1.0f, 0.98f, 0.95f), 1.15f, 0.24f);
+        } else {
+            Renderer::setDirectionalLight(glm::vec3(-0.40f, -1.00f, -0.30f), glm::vec3(1.0f, 0.98f, 0.95f), 1.05f, 0.22f);
+        }
 
         m_runtimeEntityCameraActive = false;
         if (m_activeScene.getState() == SceneState::Play && runtimeCameraTransform.has_value()) {
@@ -1228,7 +1373,7 @@ namespace Valkron {
             }
         }
 
-        if (m_showBottomPanel) {
+        if (m_showAssetManagerPanel || m_showConsolePanel) {
             if (m_assetBrowserPanelController != nullptr) {
                 m_assetBrowserPanelController->render(deltaTime);
             }
@@ -1241,6 +1386,8 @@ namespace Valkron {
         }
 
         drawAssetImportFileBrowser();
+
+        syncActiveSceneToLibrary();
 
         m_resetLayoutRequested = false;
     }
@@ -1322,25 +1469,6 @@ namespace Valkron {
             m_sceneCameraDistance *= std::exp(-io.MouseWheel * m_sceneCameraZoomSpeed);
             m_sceneCameraDistance = std::clamp(m_sceneCameraDistance, 0.15f, 500.0f);
             changedCamera = true;
-        }
-
-        if (sceneImageHovered && m_sceneViewOptionsPopupEnabled && ImGui::IsMouseReleased(ImGuiMouseButton_Right) && !io.KeyCtrl) {
-            ImGui::OpenPopup("SceneView.Options");
-        }
-
-        if (ImGui::BeginPopup("SceneView.Options")) {
-            ImGui::Text("Scene View Options");
-            ImGui::Separator();
-            ImGui::TextDisabled("Controls");
-            ImGui::BulletText("Middle mouse drag: orbit around pivot");
-            ImGui::BulletText("Mouse wheel: zoom in/out");
-            ImGui::BulletText("Ctrl + right mouse drag: pan scene");
-            ImGui::BulletText("Right click: open this options menu");
-            ImGui::Spacing();
-            ImGui::TextDisabled("Tuning controls moved to Settings > Scene View and Gizmo.");
-            ImGui::TextDisabled("Shortcuts: W Translate, E Rotate, R Scale");
-
-            ImGui::EndPopup();
         }
 
         if (changedCamera) {

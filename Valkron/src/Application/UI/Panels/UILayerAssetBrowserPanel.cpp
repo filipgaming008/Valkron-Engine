@@ -3,46 +3,28 @@
 namespace Valkron {
 
     void UILayer::drawBottomPanel() {
-        if (!ImGui::Begin("Project", &m_showBottomPanel)) {
-            ImGui::End();
-            return;
-        }
-
-        drawWindowPanelGradient();
-
-        if (ImGui::BeginTabBar("ProjectTabs", ImGuiTabBarFlags_None)) {
-            if (ImGui::BeginTabItem("Project")) {
-                ImGui::Text("Asset Viewer / Loader");
-                ImGui::Separator();
+        if (m_showAssetManagerPanel) {
+            if (ImGui::Begin("Asset Manager", &m_showAssetManagerPanel)) {
+                drawWindowPanelGradient();
                 drawAssetsPanel();
-                ImGui::EndTabItem();
             }
-
-            if (ImGui::BeginTabItem("Console")) {
-                drawTerminalPanel();
-                ImGui::EndTabItem();
-            }
-
-            ImGui::EndTabBar();
+            ImGui::End();
         }
 
-        ImGui::End();
+        if (m_showConsolePanel) {
+            if (ImGui::Begin("Console", &m_showConsolePanel)) {
+                drawWindowPanelGradient();
+                drawTerminalPanel();
+            }
+            ImGui::End();
+        }
     }
 
     void UILayer::drawAssetsPanel() {
         constexpr float kFixedAssetIconSize = 72.0f;
-
-        ImGui::Text("Runtime Importer");
-        if (ImGui::Button("Import Asset...")) {
-            loadRuntimeAssetAuto();
-        }
-
-        ImGui::SameLine();
-        ImGui::TextDisabled("Auto-detects texture/model/shader/compute types and registers them in the asset list.");
-
-        ImGui::Spacing();
-        ImGui::Separator();
-        ImGui::Text("Asset Viewer");
+        constexpr float kFolderIconSize = 56.0f;
+        constexpr float kToolbarIconSize = 22.0f;
+        ImGui::TextUnformatted("Asset Viewer");
 
         const auto& assets = m_activeScene.getAssets();
 
@@ -53,6 +35,52 @@ namespace Valkron {
         if (currentFolder != m_assetBrowserFolderFilter) {
             m_assetBrowserFolderFilter = currentFolder;
         }
+
+        if (m_assetBrowserNavigationHistory.empty()) {
+            m_assetBrowserNavigationHistory.push_back(currentFolder);
+            m_assetBrowserNavigationIndex = 0;
+        }
+
+        if (m_assetBrowserNavigationIndex < 0 || m_assetBrowserNavigationIndex >= static_cast<int>(m_assetBrowserNavigationHistory.size())) {
+            m_assetBrowserNavigationIndex = static_cast<int>(m_assetBrowserNavigationHistory.size()) - 1;
+        }
+
+        if (m_assetBrowserNavigationIndex >= 0 &&
+            m_assetBrowserNavigationIndex < static_cast<int>(m_assetBrowserNavigationHistory.size()) &&
+            m_assetBrowserNavigationHistory[static_cast<std::size_t>(m_assetBrowserNavigationIndex)] != currentFolder) {
+            m_assetBrowserNavigationHistory.erase(
+                m_assetBrowserNavigationHistory.begin() + static_cast<std::ptrdiff_t>(m_assetBrowserNavigationIndex + 1),
+                m_assetBrowserNavigationHistory.end()
+            );
+            m_assetBrowserNavigationHistory.push_back(currentFolder);
+            m_assetBrowserNavigationIndex = static_cast<int>(m_assetBrowserNavigationHistory.size()) - 1;
+        }
+
+        auto navigateToFolder = [&](const std::string& targetFolder, bool recordInHistory) {
+            std::string normalizedFolder = normalizeFolderPath(targetFolder);
+            if (normalizedFolder == "All") {
+                normalizedFolder.clear();
+            }
+
+            if (normalizedFolder == currentFolder) {
+                return;
+            }
+
+            currentFolder = normalizedFolder;
+            m_assetBrowserFolderFilter = normalizedFolder;
+            m_selectedAssetIndex = -1;
+
+            if (!recordInHistory) {
+                return;
+            }
+
+            m_assetBrowserNavigationHistory.erase(
+                m_assetBrowserNavigationHistory.begin() + static_cast<std::ptrdiff_t>(m_assetBrowserNavigationIndex + 1),
+                m_assetBrowserNavigationHistory.end()
+            );
+            m_assetBrowserNavigationHistory.push_back(normalizedFolder);
+            m_assetBrowserNavigationIndex = static_cast<int>(m_assetBrowserNavigationHistory.size()) - 1;
+        };
 
         std::set<std::string> childFolders;
         std::vector<std::size_t> filteredAssetIndices;
@@ -78,169 +106,265 @@ namespace Valkron {
             }
         }
 
-        if (ImGui::Button("Root")) {
-            currentFolder.clear();
-            m_assetBrowserFolderFilter.clear();
-        }
+        std::optional<std::size_t> pendingRemoveAssetIndex;
 
-        ImGui::SameLine();
-        const bool canGoUp = !currentFolder.empty();
-        if (!canGoUp) {
-            ImGui::BeginDisabled();
-        }
-        if (ImGui::Button("Up")) {
-            currentFolder = getParentFolderPath(currentFolder);
-            m_assetBrowserFolderFilter = currentFolder;
-        }
-        if (!canGoUp) {
-            ImGui::EndDisabled();
-        }
+        const bool canGoBack = m_assetBrowserNavigationIndex > 0;
+        const bool canGoForward = m_assetBrowserNavigationIndex >= 0 && m_assetBrowserNavigationIndex < static_cast<int>(m_assetBrowserNavigationHistory.size()) - 1;
+        std::string displayPath = currentFolder.empty() ? "/" : ("/" + currentFolder);
 
-        ImGui::SameLine();
-        ImGui::Text("Folder: %s", currentFolder.empty() ? "Root" : currentFolder.c_str());
+        bool openImportBrowser = false;
+        if (ImGui::BeginTable("AssetBrowserToolbar", 2, ImGuiTableFlags_SizingFixedFit | ImGuiTableFlags_NoSavedSettings)) {
+            ImGui::TableSetupColumn("##AssetBrowserToolbarMain", ImGuiTableColumnFlags_WidthStretch);
+            ImGui::TableSetupColumn("##AssetBrowserToolbarImport", ImGuiTableColumnFlags_WidthFixed, kToolbarIconSize + 8.0f);
+            ImGui::TableNextRow();
 
-        if (ImGui::BeginChild("AssetFolderNavigator", ImVec2(0.0f, 44.0f), true, ImGuiWindowFlags_HorizontalScrollbar)) {
-            if (childFolders.empty()) {
-                ImGui::TextDisabled("No subfolders.");
-            } else {
-                bool firstFolderButton = true;
-                for (const std::string& childFolderPath : childFolders) {
-                    if (!firstFolderButton) {
-                        ImGui::SameLine();
-                    }
-                    firstFolderButton = false;
-
-                    const std::string childLabel = std::string("DIR ") + getFolderLeafName(childFolderPath);
-                    if (ImGui::Button((childLabel + "##asset_folder_" + childFolderPath).c_str())) {
-                        currentFolder = childFolderPath;
-                        m_assetBrowserFolderFilter = childFolderPath;
-                        m_selectedAssetIndex = -1;
-                    }
-                }
+            ImGui::TableSetColumnIndex(0);
+            if (!canGoBack) {
+                ImGui::BeginDisabled();
             }
-        }
-        ImGui::EndChild();
+            if (ImGui::Button("<")) {
+                --m_assetBrowserNavigationIndex;
+                const std::string& targetFolder = m_assetBrowserNavigationHistory[static_cast<std::size_t>(m_assetBrowserNavigationIndex)];
+                navigateToFolder(targetFolder, false);
+            }
+            if (!canGoBack) {
+                ImGui::EndDisabled();
+            }
 
-        ImGui::Text("Icon Size: %.0f px (fixed)", kFixedAssetIconSize);
-        ImGui::SameLine();
-        ImGui::Text("Visible: %d / Total: %d", static_cast<int>(filteredAssetIndices.size()), static_cast<int>(assets.size()));
+            ImGui::SameLine();
+            if (!canGoForward) {
+                ImGui::BeginDisabled();
+            }
+            if (ImGui::Button(">")) {
+                ++m_assetBrowserNavigationIndex;
+                const std::string& targetFolder = m_assetBrowserNavigationHistory[static_cast<std::size_t>(m_assetBrowserNavigationIndex)];
+                navigateToFolder(targetFolder, false);
+            }
+            if (!canGoForward) {
+                ImGui::EndDisabled();
+            }
+
+            ImGui::SameLine();
+            ImGui::Text("Path: %s", displayPath.c_str());
+
+            ImGui::TableSetColumnIndex(1);
+            if (m_assetImportIconTexture != nullptr && m_assetImportIconTexture->getID() != 0) {
+                ImGui::PushStyleColor(ImGuiCol_Button, IM_COL32(18, 24, 30, 210));
+                ImGui::PushStyleColor(ImGuiCol_ButtonHovered, IM_COL32(34, 44, 56, 235));
+                ImGui::PushStyleColor(ImGuiCol_ButtonActive, IM_COL32(42, 56, 72, 245));
+
+                openImportBrowser = ImGui::ImageButton(
+                    "##AssetImportIconButton",
+                    (ImTextureID)(uintptr_t)m_assetImportIconTexture->getID(),
+                    ImVec2(kToolbarIconSize, kToolbarIconSize),
+                    ImVec2(0.0f, 0.0f),
+                    ImVec2(1.0f, 1.0f)
+                );
+
+                ImGui::PopStyleColor(3);
+            } else {
+                openImportBrowser = ImGui::Button("Import");
+            }
+
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("Import assets (models, shaders, textures, compute)");
+            }
+
+            ImGui::EndTable();
+        }
+
+        if (openImportBrowser) {
+            loadRuntimeAssetAuto();
+        }
 
         if (m_selectedAssetIndex >= static_cast<int>(assets.size())) {
             m_selectedAssetIndex = -1;
         }
 
-        if (filteredAssetIndices.empty()) {
-            ImGui::TextDisabled("No assets in this folder.");
-        } else {
-            const float cellWidth = kFixedAssetIconSize + 30.0f;
-            const int columns = std::max(1, static_cast<int>(std::max(1.0f, ImGui::GetContentRegionAvail().x) / cellWidth));
+        struct BrowserEntry {
+            bool isFolder = false;
+            std::string folderPath;
+            std::size_t assetIndex = 0;
+        };
 
-            if (ImGui::BeginTable("AssetIconGrid", columns, ImGuiTableFlags_SizingStretchSame)) {
-                for (std::size_t assetIndex : filteredAssetIndices) {
-                    ImGui::TableNextColumn();
-                    ImGui::PushID(static_cast<int>(assetIndex));
-
-                    const SceneAsset& asset = assets[assetIndex];
-                    ImVec4 assetColor = getAssetIconColor(asset);
-                    if (m_selectedAssetIndex == static_cast<int>(assetIndex)) {
-                        assetColor = brightenColor(assetColor, 0.12f);
-                    }
-
-                    ImGui::PushStyleColor(ImGuiCol_Button, assetColor);
-                    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, brightenColor(assetColor, 0.08f));
-                    ImGui::PushStyleColor(ImGuiCol_ButtonActive, brightenColor(assetColor, 0.14f));
-
-                    const std::string iconLabel = std::string(getAssetIconToken(asset)) + "##asset_icon";
-                    if (ImGui::Button(iconLabel.c_str(), ImVec2(kFixedAssetIconSize, kFixedAssetIconSize))) {
-                        m_selectedAssetIndex = static_cast<int>(assetIndex);
-                    }
-
-                    if (isModelSceneAsset(asset) && ImGui::BeginDragDropSource(ImGuiDragDropFlags_SourceAllowNullID)) {
-                        ImGui::SetDragDropPayload(kModelAssetDragPayloadType, asset.name.c_str(), asset.name.size() + 1);
-                        ImGui::Text("Place model in Scene View");
-                        ImGui::TextDisabled("%s", asset.name.c_str());
-                        ImGui::EndDragDropSource();
-                    }
-
-                    const bool iconHovered = ImGui::IsItemHovered();
-                    ImGui::PopStyleColor(3);
-
-                    if (iconHovered) {
-                        ImGui::BeginTooltip();
-                        ImGui::Text("%s", asset.name.c_str());
-                        ImGui::TextDisabled("%s", asset.path.c_str());
-                        ImGui::EndTooltip();
-                    }
-
-                    ImGui::TextWrapped("%s", asset.name.c_str());
-                    ImGui::PopID();
-                }
-
-                ImGui::EndTable();
-            }
+        std::vector<BrowserEntry> browserEntries;
+        browserEntries.reserve(childFolders.size() + filteredAssetIndices.size());
+        for (const std::string& childFolderPath : childFolders) {
+            browserEntries.push_back(BrowserEntry{true, childFolderPath, 0});
+        }
+        for (std::size_t assetIndex : filteredAssetIndices) {
+            browserEntries.push_back(BrowserEntry{false, std::string{}, assetIndex});
         }
 
-        if (m_selectedAssetIndex >= 0 && m_selectedAssetIndex < static_cast<int>(assets.size())) {
+        const bool hasSelectedAsset = m_selectedAssetIndex >= 0 && m_selectedAssetIndex < static_cast<int>(assets.size());
+        const bool hasSelectedModelActions = hasSelectedAsset && isModelSceneAsset(assets[static_cast<std::size_t>(m_selectedAssetIndex)]);
+        const float assetGridHeight = hasSelectedModelActions ? -86.0f : -4.0f;
+        if (ImGui::BeginChild("AssetBrowserGrid", ImVec2(0.0f, assetGridHeight), true)) {
+            if (browserEntries.empty()) {
+                ImGui::TextDisabled("Nothing to show in this folder.");
+            } else {
+                const float cellWidth = std::max(kFixedAssetIconSize, kFolderIconSize) + 16.0f;
+                const int columns = std::max(1, static_cast<int>(std::max(1.0f, ImGui::GetContentRegionAvail().x) / cellWidth));
+
+                if (ImGui::BeginTable("AssetBrowserUnifiedGrid", columns, ImGuiTableFlags_SizingStretchSame)) {
+                    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(5.0f, 3.0f));
+                    for (const BrowserEntry& entry : browserEntries) {
+                        ImGui::TableNextColumn();
+
+                        if (entry.isFolder) {
+                            ImGui::PushID(entry.folderPath.c_str());
+
+                            bool openFolder = false;
+                            if (m_assetDirectoryIconTexture != nullptr && m_assetDirectoryIconTexture->getID() != 0) {
+                                ImGui::PushStyleColor(ImGuiCol_Button, IM_COL32(18, 26, 34, 210));
+                                ImGui::PushStyleColor(ImGuiCol_ButtonHovered, IM_COL32(30, 44, 58, 230));
+                                ImGui::PushStyleColor(ImGuiCol_ButtonActive, IM_COL32(40, 56, 74, 245));
+                                openFolder = ImGui::ImageButton(
+                                    "##AssetFolderIcon",
+                                    (ImTextureID)(uintptr_t)m_assetDirectoryIconTexture->getID(),
+                                    ImVec2(kFolderIconSize, kFolderIconSize),
+                                    ImVec2(0.0f, 0.0f),
+                                    ImVec2(1.0f, 1.0f)
+                                );
+                                ImGui::PopStyleColor(3);
+                            } else {
+                                openFolder = ImGui::Button("DIR", ImVec2(kFolderIconSize, kFolderIconSize));
+                            }
+
+                            if (openFolder) {
+                                navigateToFolder(entry.folderPath, true);
+                            }
+
+                            if (ImGui::IsItemHovered()) {
+                                ImGui::SetTooltip("Open folder: %s", entry.folderPath.c_str());
+                            }
+
+                            ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + kFolderIconSize + 8.0f);
+                            ImGui::TextWrapped("%s", getFolderLeafName(entry.folderPath).c_str());
+                            ImGui::PopTextWrapPos();
+
+                            ImGui::PopID();
+                        } else {
+                            const std::size_t assetIndex = entry.assetIndex;
+                            ImGui::PushID(static_cast<int>(assetIndex));
+
+                            const SceneAsset& asset = assets[assetIndex];
+                            ImVec4 assetColor = getAssetIconColor(asset);
+                            if (m_selectedAssetIndex == static_cast<int>(assetIndex)) {
+                                assetColor = brightenColor(assetColor, 0.12f);
+                            }
+
+                            ImGui::PushStyleColor(ImGuiCol_Button, assetColor);
+                            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, brightenColor(assetColor, 0.08f));
+                            ImGui::PushStyleColor(ImGuiCol_ButtonActive, brightenColor(assetColor, 0.14f));
+
+                            const std::string iconLabel = std::string(getAssetIconToken(asset)) + "##asset_icon";
+                            if (ImGui::Button(iconLabel.c_str(), ImVec2(kFixedAssetIconSize, kFixedAssetIconSize))) {
+                                m_selectedAssetIndex = static_cast<int>(assetIndex);
+                            }
+
+                            if (isModelSceneAsset(asset) && ImGui::BeginDragDropSource(ImGuiDragDropFlags_SourceAllowNullID)) {
+                                ImGui::SetDragDropPayload(kModelAssetDragPayloadType, asset.name.c_str(), asset.name.size() + 1);
+                                ImGui::Text("Place model in Scene View");
+                                ImGui::TextDisabled("%s", asset.name.c_str());
+                                ImGui::EndDragDropSource();
+                            }
+
+                            if (ImGui::BeginPopupContextItem("AssetEntryContextMenu")) {
+                                if (ImGui::MenuItem("Remove From Scene Asset List")) {
+                                    pendingRemoveAssetIndex = assetIndex;
+                                }
+                                ImGui::EndPopup();
+                            }
+
+                            const bool iconHovered = ImGui::IsItemHovered();
+                            ImGui::PopStyleColor(3);
+
+                            if (iconHovered) {
+                                ImGui::BeginTooltip();
+                                ImGui::Text("%s", asset.name.c_str());
+                                ImGui::TextDisabled("%s", asset.path.c_str());
+                                ImGui::EndTooltip();
+                            }
+
+                            ImGui::TextWrapped("%s", asset.name.c_str());
+                            ImGui::PopID();
+                        }
+                    }
+
+                    ImGui::PopStyleVar();
+
+                    ImGui::EndTable();
+                }
+            }
+        }
+        ImGui::EndChild();
+
+        if (hasSelectedModelActions) {
             const SceneAsset& selectedAsset = assets[static_cast<std::size_t>(m_selectedAssetIndex)];
             ImGui::Spacing();
             ImGui::Separator();
-            ImGui::Text("Selected Asset");
-            ImGui::BulletText("Name: %s", selectedAsset.name.c_str());
-            ImGui::BulletText("Folder: %s", getAssetFolderPath(selectedAsset).empty() ? "Root" : getAssetFolderPath(selectedAsset).c_str());
-            ImGui::TextWrapped("Path: %s", selectedAsset.path.c_str());
-
-            if (isModelSceneAsset(selectedAsset)) {
-                if (ImGui::Button("Add Model Entity To Scene")) {
-                    std::shared_ptr<Model> model = AssetLoader::getModel(selectedAsset.name);
-                    if (model == nullptr || !model->isLoaded()) {
-                        AssetLoader::loadModel(selectedAsset.name, selectedAsset.path);
-                        model = AssetLoader::getModel(selectedAsset.name);
-                    }
-
-                    if (model != nullptr && model->isLoaded()) {
-                        const std::string entityName = m_activeScene.makeUniqueEntityName(deriveAssetBaseName(selectedAsset.name, "Model"));
-                        m_activeScene.addEntity(entityName, SceneEntityType::Generic);
-
-                        if (const std::optional<std::size_t> entityIndex = m_activeScene.findEntityIndex(entityName); entityIndex.has_value()) {
-                            if (SceneEntity* entity = m_activeScene.getEntityByIndex(entityIndex.value()); entity != nullptr) {
-                                entity->modelAssetName = selectedAsset.name;
-                                entity->transform.position = m_sceneCameraPivot;
-                            }
-                            setSelectedEntity(static_cast<int>(entityIndex.value()));
-                        }
-
-                        appendTerminalLine("Added model entity " + entityName + " from asset " + selectedAsset.name + ".");
-                    } else {
-                        appendTerminalLine("Unable to load model for scene placement: " + selectedAsset.name + ".");
-                    }
+            if (ImGui::Button("Add Model Entity To Scene")) {
+                std::shared_ptr<Model> model = AssetLoader::getModel(selectedAsset.name);
+                if (model == nullptr || !model->isLoaded()) {
+                    AssetLoader::loadModel(selectedAsset.name, selectedAsset.path);
+                    model = AssetLoader::getModel(selectedAsset.name);
                 }
 
-                ImGui::SameLine();
-                ImGui::TextDisabled("(or drag icon into Scene View)");
+                if (model != nullptr && model->isLoaded()) {
+                    const std::string entityName = m_activeScene.makeUniqueEntityName(deriveAssetBaseName(selectedAsset.name, "Model"));
+                    m_activeScene.addEntity(entityName, SceneEntityType::Generic);
+
+                    if (const std::optional<std::size_t> entityIndex = m_activeScene.findEntityIndex(entityName); entityIndex.has_value()) {
+                        if (SceneEntity* entity = m_activeScene.getEntityByIndex(entityIndex.value()); entity != nullptr) {
+                            entity->modelAssetName = selectedAsset.name;
+                            entity->transform.position = m_sceneCameraPivot;
+                        }
+                        setSelectedEntity(static_cast<int>(entityIndex.value()));
+                }
+
+                    appendTerminalLine("Added model entity " + entityName + " from asset " + selectedAsset.name + ".");
+                } else {
+                    appendTerminalLine("Unable to load model for scene placement: " + selectedAsset.name + ".");
+                }
             }
 
-            if (ImGui::Button("Remove From Scene Asset List")) {
+            ImGui::SameLine();
+            ImGui::TextDisabled("(or drag icon into Scene View)");
+        }
+
+        if (pendingRemoveAssetIndex.has_value()) {
+            const auto& currentAssets = m_activeScene.getAssets();
+            if (pendingRemoveAssetIndex.value() < currentAssets.size()) {
+                const SceneAsset assetToRemove = currentAssets[pendingRemoveAssetIndex.value()];
+
                 int clearedBindings = 0;
-                if (isModelSceneAsset(selectedAsset)) {
+                if (isModelSceneAsset(assetToRemove)) {
                     const auto& entities = m_activeScene.getEntityData();
                     for (std::size_t entityIndex = 0; entityIndex < entities.size(); ++entityIndex) {
-                        if (SceneEntity* entity = m_activeScene.getEntityByIndex(entityIndex); entity != nullptr && entity->modelAssetName == selectedAsset.name) {
+                        if (SceneEntity* entity = m_activeScene.getEntityByIndex(entityIndex); entity != nullptr && entity->modelAssetName == assetToRemove.name) {
                             entity->modelAssetName.clear();
                             ++clearedBindings;
                         }
                     }
                 }
 
-                if (m_activeScene.removeAsset(selectedAsset.name)) {
+                if (m_activeScene.removeAsset(assetToRemove.name)) {
                     if (clearedBindings > 0) {
                         appendTerminalLine(
-                            "Removed scene asset entry: " + selectedAsset.name +
+                            "Removed scene asset entry: " + assetToRemove.name +
                             " (cleared " + std::to_string(clearedBindings) + " model binding(s))."
                         );
                     } else {
-                        appendTerminalLine("Removed scene asset entry: " + selectedAsset.name + ".");
+                        appendTerminalLine("Removed scene asset entry: " + assetToRemove.name + ".");
                     }
-                    m_selectedAssetIndex = -1;
+
+                    const int removedIndex = static_cast<int>(pendingRemoveAssetIndex.value());
+                    if (m_selectedAssetIndex == removedIndex) {
+                        m_selectedAssetIndex = -1;
+                    } else if (m_selectedAssetIndex > removedIndex) {
+                        --m_selectedAssetIndex;
+                    }
                 }
             }
         }

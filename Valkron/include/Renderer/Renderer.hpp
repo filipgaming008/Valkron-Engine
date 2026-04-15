@@ -34,6 +34,7 @@ namespace Valkron {
             static void setSceneModelInstances(const std::vector<SceneModelInstance>& modelInstances);
             static void setSceneEntityTransforms(const std::vector<glm::mat4>& entityTransforms, int selectedEntityIndex);
             static void setLightEntityPositions(const std::vector<glm::vec3>& lightPositions);
+                static void setDirectionalLight(const glm::vec3& direction, const glm::vec3& color, float intensity, float ambientStrength);
             static glm::vec3 getCameraPosition();
             static glm::vec3 getCameraTarget();
             static glm::vec3 getCameraUp();
@@ -42,6 +43,8 @@ namespace Valkron {
             static void onWindowResize(int width, int height);
             static void setViewportSize(int width, int height);
             static unsigned int getFrameTextureID();
+                static unsigned int getSceneFrameTextureID();
+                static unsigned int getGameFrameTextureID();
             static int getViewportWidth();
             static int getViewportHeight();
     };

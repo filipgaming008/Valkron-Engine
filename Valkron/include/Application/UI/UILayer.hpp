@@ -58,6 +58,8 @@ namespace Valkron {
             void drawTerminalPanel();
             void setSelectedEntity(int entityIndex);
             void clearEntitySelection();
+            void syncActiveSceneToLibrary();
+            bool switchToSceneByIndex(std::size_t sceneIndex);
             void initializeSceneCameraController();
             void updateSceneCameraController(bool sceneImageHovered);
             void syncRendererCameraFromController();
@@ -69,6 +71,8 @@ namespace Valkron {
             bool loadRuntimeAssetAuto();
 
             Scene m_activeScene{"Main Scene"};
+            std::vector<Scene> m_editorScenes;
+            int m_activeSceneLibraryIndex = 0;
             std::vector<std::string> m_terminalLines;
 
             Window* m_window = nullptr;
@@ -93,7 +97,8 @@ namespace Valkron {
             bool m_showInspectorPanel = true;
             bool m_showSettingsPanel = false;
             bool m_showDebugPanel = false;
-            bool m_showBottomPanel = true;
+            bool m_showAssetManagerPanel = true;
+            bool m_showConsolePanel = true;
             bool m_resetLayoutRequested = true;
             bool m_dockspaceBuilt = false;
 
@@ -122,6 +127,8 @@ namespace Valkron {
 
             std::shared_ptr<Texture> m_cameraEntityIconTexture = nullptr;
             std::shared_ptr<Texture> m_lightEntityIconTexture = nullptr;
+            std::shared_ptr<Texture> m_assetDirectoryIconTexture = nullptr;
+            std::shared_ptr<Texture> m_assetImportIconTexture = nullptr;
             float m_sceneEntityIconPixels = 22.0f;
 
             std::unique_ptr<EditorPanel> m_topNavbarPanelController = nullptr;
@@ -145,6 +152,8 @@ namespace Valkron {
 
             std::string m_assetBrowserFolderFilter;
             int m_selectedAssetIndex = -1;
+            std::vector<std::string> m_assetBrowserNavigationHistory;
+            int m_assetBrowserNavigationIndex = -1;
 
             bool m_assetImportBrowserOpen = false;
             bool m_assetImportBrowserRequestOpen = false;
