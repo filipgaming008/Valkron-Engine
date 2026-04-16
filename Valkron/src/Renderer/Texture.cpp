@@ -110,8 +110,6 @@ namespace Valkron {
         m_depth = 1;
 
         bind();
-        glTexParameteri(m_textureTarget, GL_TEXTURE_WRAP_S, GL_REPEAT);
-        glTexParameteri(m_textureTarget, GL_TEXTURE_WRAP_T, GL_REPEAT);
         glTexParameteri(m_textureTarget, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
         glTexParameteri(m_textureTarget, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 
@@ -137,6 +135,10 @@ namespace Valkron {
         } else if (m_channels == 4) {
             format = GL_RGBA;
         }
+
+        const GLint wrapMode = (m_channels == 4) ? GL_CLAMP_TO_EDGE : GL_REPEAT;
+        glTexParameteri(m_textureTarget, GL_TEXTURE_WRAP_S, wrapMode);
+        glTexParameteri(m_textureTarget, GL_TEXTURE_WRAP_T, wrapMode);
 
         glTexImage2D(m_textureTarget, 0, static_cast<GLint>(format), m_width, m_height, 0, format, GL_UNSIGNED_BYTE, data);
         glGenerateMipmap(m_textureTarget);

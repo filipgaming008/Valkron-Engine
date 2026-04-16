@@ -21,6 +21,7 @@ namespace Valkron {
             int getWidth() const { return m_width; }
             int getHeight() const { return m_height; }
             int getDepth() const { return m_depth; }
+            int getChannels() const { return m_channels; }
             bool is3DTexture() const { return m_is3DTexture; }
 
         private:

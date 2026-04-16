@@ -10,6 +10,9 @@
 
 namespace Valkron {
 
+    constexpr int kDefaultDeselectKey = 256;
+    constexpr int kDefaultDeleteEntityKey = 261;
+
     std::string trim(const std::string& value) {
         std::size_t start = 0;
         while (start < value.size() && std::isspace(static_cast<unsigned char>(value[start])) != 0) {
@@ -90,6 +93,10 @@ namespace Valkron {
                 loadedSettings.autoDetectMonitorSize = parseBool(value, loadedSettings.autoDetectMonitorSize);
             } else if (key == "window.title") {
                 loadedSettings.windowTitle = value.empty() ? loadedSettings.windowTitle : value;
+            } else if (key == "keybind.deselect") {
+                loadedSettings.deselectKey = parseInt(value, loadedSettings.deselectKey);
+            } else if (key == "keybind.delete_entity") {
+                loadedSettings.deleteEntityKey = parseInt(value, loadedSettings.deleteEntityKey);
             }
         }
 
@@ -97,6 +104,12 @@ namespace Valkron {
         loadedSettings.windowHeight = std::max(64, loadedSettings.windowHeight);
         if (loadedSettings.windowTitle.empty()) {
             loadedSettings.windowTitle = "Valkron Engine";
+        }
+        if (loadedSettings.deselectKey < 0) {
+            loadedSettings.deselectKey = kDefaultDeselectKey;
+        }
+        if (loadedSettings.deleteEntityKey < 0) {
+            loadedSettings.deleteEntityKey = kDefaultDeleteEntityKey;
         }
 
         m_settings = loadedSettings;
@@ -122,6 +135,8 @@ namespace Valkron {
         output << "window.docked_fullscreen_windowed=" << (m_settings.dockedFullscreenWindowed ? "true" : "false") << "\n";
         output << "window.auto_detect_monitor_size=" << (m_settings.autoDetectMonitorSize ? "true" : "false") << "\n";
         output << "window.title=" << m_settings.windowTitle << "\n";
+        output << "keybind.deselect=" << m_settings.deselectKey << "\n";
+        output << "keybind.delete_entity=" << m_settings.deleteEntityKey << "\n";
 
         LOG_INFO("Saved engine config to " + m_configPath.string());
         return true;
@@ -137,6 +152,12 @@ namespace Valkron {
         m_settings.windowHeight = std::max(64, m_settings.windowHeight);
         if (m_settings.windowTitle.empty()) {
             m_settings.windowTitle = "Valkron Engine";
+        }
+        if (m_settings.deselectKey < 0) {
+            m_settings.deselectKey = kDefaultDeselectKey;
+        }
+        if (m_settings.deleteEntityKey < 0) {
+            m_settings.deleteEntityKey = kDefaultDeleteEntityKey;
         }
     }
 

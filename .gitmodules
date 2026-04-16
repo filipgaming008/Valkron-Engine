@@ -23,3 +23,6 @@
 [submodule "Valkron/vendor/imviewguizmo"]
 	path = Valkron/vendor/imviewguizmo
 	url = https://github.com/Ka1serM/ImViewGuizmo
+[submodule "Valkron/vendor/imguifiledialog"]
+	path = Valkron/vendor/imguifiledialog
+	url = https://github.com/aiekick/ImGuiFileDialog

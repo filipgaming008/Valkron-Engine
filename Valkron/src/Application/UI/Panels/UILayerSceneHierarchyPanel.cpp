@@ -73,6 +73,9 @@ namespace Valkron {
             if (const std::optional<std::size_t> cubeEntityIndex = scene.findEntityIndex("Cube"); cubeEntityIndex.has_value()) {
                 if (SceneEntity* cubeEntity = scene.getEntityByIndex(cubeEntityIndex.value()); cubeEntity != nullptr) {
                     cubeEntity->modelAssetName = "test_cube.obj";
+                    cubeEntity->modelMeshIndices.clear();
+                    cubeEntity->applyModelNodeTransforms = true;
+                    ensureEntityUsesPbrComponent(*cubeEntity);
                 }
             }
 
@@ -81,6 +84,8 @@ namespace Valkron {
             scene.addAsset("textured.frag", "assets/shaders/textured.frag");
             scene.addAsset("blinn_phong.vert", "assets/shaders/blinn_phong.vert");
             scene.addAsset("blinn_phong.frag", "assets/shaders/blinn_phong.frag");
+            scene.addAsset("pbr.vert", "assets/shaders/pbr.vert");
+            scene.addAsset("pbr.frag", "assets/shaders/pbr.frag");
             scene.addAsset("default_compute.comp", "assets/shaders/default_compute.comp");
             scene.addAsset("test_cube.obj", "assets/models/test_cube.obj");
 
@@ -447,53 +452,6 @@ namespace Valkron {
             ImGui::EndPopup();
         }
 
-        const auto processDelete = [&](std::size_t entityIndex) {
-            const auto& currentEntities = m_activeScene.getEntityData();
-            if (entityIndex >= currentEntities.size()) {
-                return;
-            }
-
-            const std::string removedEntityName = currentEntities[entityIndex].name;
-            if (m_activeScene.removeEntity(removedEntityName)) {
-                appendTerminalLine("Removed " + removedEntityName + ".");
-            }
-
-            const std::string currentPrimaryCameraName = m_activeScene.getGameStateValue("PrimaryCameraEntity").value_or("");
-            if (!currentPrimaryCameraName.empty() && currentPrimaryCameraName == removedEntityName) {
-                std::string fallbackCameraName;
-                const auto& remainingEntities = m_activeScene.getEntityData();
-                for (const SceneEntity& remainingEntity : remainingEntities) {
-                    if (remainingEntity.type == SceneEntityType::Camera) {
-                        fallbackCameraName = remainingEntity.name;
-                        break;
-                    }
-                }
-
-                m_activeScene.setGameStateValue("PrimaryCameraEntity", fallbackCameraName);
-                if (fallbackCameraName.empty()) {
-                    appendTerminalLine("Primary play camera cleared (no camera entities remain).");
-                } else {
-                    appendTerminalLine("Primary play camera switched to " + fallbackCameraName + ".");
-                }
-            }
-
-            if (m_selectedEntityIndex == static_cast<int>(entityIndex)) {
-                clearEntitySelection();
-                return;
-            }
-
-            if (m_selectedEntityIndex > static_cast<int>(entityIndex)) {
-                --m_selectedEntityIndex;
-            }
-
-            const auto& updatedEntities = m_activeScene.getEntityData();
-            if (m_selectedEntityIndex >= 0 && m_selectedEntityIndex < static_cast<int>(updatedEntities.size())) {
-                setSelectedEntity(m_selectedEntityIndex);
-            } else {
-                clearEntitySelection();
-            }
-        };
-
         if (pendingClearParentByDrop.has_value()) {
             const auto& currentEntities = m_activeScene.getEntityData();
             if (pendingClearParentByDrop.value() < currentEntities.size()) {
@@ -551,6 +509,10 @@ namespace Valkron {
                         duplicatedEntity->parentIndex = sourceEntity.parentIndex;
                         duplicatedEntity->type = sourceEntity.type;
                         duplicatedEntity->modelAssetName = sourceEntity.modelAssetName;
+                        duplicatedEntity->modelMeshIndices = sourceEntity.modelMeshIndices;
+                        duplicatedEntity->applyModelNodeTransforms = sourceEntity.applyModelNodeTransforms;
+                        duplicatedEntity->shaderComponent = sourceEntity.shaderComponent;
+                        duplicatedEntity->lightComponent = sourceEntity.lightComponent;
                     }
 
                     setSelectedEntity(static_cast<int>(duplicatedIndex.value()));
@@ -560,7 +522,7 @@ namespace Valkron {
         }
 
         if (pendingDeleteEntity.has_value()) {
-            processDelete(pendingDeleteEntity.value());
+            (void)deleteEntityByIndex(pendingDeleteEntity.value());
         }
 
         if (pendingCreateTopLevelEntity.has_value()) {

@@ -10,4 +10,31 @@ namespace Valkron {
         return stem.empty() ? fallbackName : stem;
     }
 
+    void ensureEntityUsesPbrComponent(SceneEntity& entity) {
+        if (entity.type != SceneEntityType::Generic || entity.modelAssetName.empty()) {
+            return;
+        }
+
+        const bool shouldPreferPbr =
+            !entity.shaderComponent.enabled ||
+            entity.shaderComponent.shaderName.empty() ||
+            entity.shaderComponent.shaderName == "Blinn-Phong";
+
+        entity.shaderComponent.enabled = true;
+
+        if (!shouldPreferPbr) {
+            return;
+        }
+
+        if (AssetLoader::getShader("PBR") != nullptr) {
+            entity.shaderComponent.shaderName = "PBR";
+            return;
+        }
+
+        const std::vector<std::string> shaderNames = AssetLoader::getShaderNames();
+        if (!shaderNames.empty()) {
+            entity.shaderComponent.shaderName = shaderNames.front();
+        }
+    }
+
 }

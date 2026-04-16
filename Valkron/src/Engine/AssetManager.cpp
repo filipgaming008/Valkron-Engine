@@ -183,10 +183,34 @@ namespace Valkron {
             }
 
             const std::string shaderName = AssetLoader::getModelShader(entity.modelAssetName);
+
             output << "ENTITY "
                    << std::quoted(entity.name) << " "
                    << std::quoted(entity.modelAssetName) << " "
-                   << std::quoted(shaderName) << "\n";
+                   << std::quoted(shaderName) << " "
+                   << (entity.shaderComponent.enabled ? 1 : 0) << " "
+                   << std::quoted(entity.shaderComponent.shaderName) << " "
+                   << std::quoted(entity.shaderComponent.pbrMaterial.albedoTextureAsset) << " "
+                   << std::quoted(entity.shaderComponent.pbrMaterial.normalTextureAsset) << " "
+                   << std::quoted(entity.shaderComponent.pbrMaterial.metallicTextureAsset) << " "
+                   << std::quoted(entity.shaderComponent.pbrMaterial.roughnessTextureAsset) << " "
+                   << std::quoted(entity.shaderComponent.pbrMaterial.aoTextureAsset) << " "
+                                     << std::quoted(entity.shaderComponent.pbrMaterial.diffuseTextureAsset) << " "
+                                     << std::quoted(entity.shaderComponent.pbrMaterial.alphaTextureAsset) << " "
+                   << entity.shaderComponent.pbrMaterial.albedoColor.x << " "
+                   << entity.shaderComponent.pbrMaterial.albedoColor.y << " "
+                   << entity.shaderComponent.pbrMaterial.albedoColor.z << " "
+                   << entity.shaderComponent.pbrMaterial.metallic << " "
+                   << entity.shaderComponent.pbrMaterial.roughness << " "
+                   << entity.shaderComponent.pbrMaterial.ambientOcclusion << " "
+                   << (entity.applyModelNodeTransforms ? 1 : 0) << " "
+                   << entity.modelMeshIndices.size();
+
+            for (const int meshIndex : entity.modelMeshIndices) {
+                output << " " << meshIndex;
+            }
+
+            output << "\n";
         }
 
         LOG_INFO("Saved asset cache: " + s_cachePath.string());
@@ -217,6 +241,21 @@ namespace Valkron {
             std::string entityName;
             std::string modelName;
             std::string shaderName;
+            std::vector<int> modelMeshIndices;
+            bool applyModelNodeTransforms = true;
+            bool hasShaderComponent = false;
+            std::string componentShaderName;
+            std::string diffuseTextureAsset;
+            std::string albedoTextureAsset;
+            std::string alphaTextureAsset;
+            std::string normalTextureAsset;
+            std::string metallicTextureAsset;
+            std::string roughnessTextureAsset;
+            std::string aoTextureAsset;
+            glm::vec3 albedoColor{1.0f, 1.0f, 1.0f};
+            float metallic = 0.0f;
+            float roughness = 0.55f;
+            float ambientOcclusion = 1.0f;
         };
         std::vector<EntityBinding> entityBindings;
 
@@ -245,6 +284,59 @@ namespace Valkron {
             if (token == "ENTITY") {
                 EntityBinding binding;
                 stream >> std::quoted(binding.entityName) >> std::quoted(binding.modelName) >> std::quoted(binding.shaderName);
+
+                int hasShaderComponent = 0;
+                if (stream >> hasShaderComponent) {
+                    binding.hasShaderComponent = hasShaderComponent != 0;
+                    stream >> std::quoted(binding.componentShaderName)
+                           >> std::quoted(binding.albedoTextureAsset)
+                           >> std::quoted(binding.normalTextureAsset)
+                           >> std::quoted(binding.metallicTextureAsset)
+                           >> std::quoted(binding.roughnessTextureAsset)
+                           >> std::quoted(binding.aoTextureAsset);
+
+                    // Optional fields for newer cache rows.
+                    stream >> std::ws;
+                    if (stream.peek() == '"') {
+                        stream >> std::quoted(binding.diffuseTextureAsset)
+                               >> std::quoted(binding.alphaTextureAsset);
+                    }
+
+                    if (binding.diffuseTextureAsset.empty()) {
+                        binding.diffuseTextureAsset = binding.albedoTextureAsset;
+                    }
+
+                    glm::vec3 albedoColor{1.0f, 1.0f, 1.0f};
+                    float metallic = binding.metallic;
+                    float roughness = binding.roughness;
+                    float ambientOcclusion = binding.ambientOcclusion;
+                    if (stream >> albedoColor.x >> albedoColor.y >> albedoColor.z >> metallic >> roughness >> ambientOcclusion) {
+                        binding.albedoColor = albedoColor;
+                        binding.metallic = metallic;
+                        binding.roughness = roughness;
+                        binding.ambientOcclusion = ambientOcclusion;
+                    }
+
+                    int applyModelNodeTransforms = 1;
+                    if (stream >> applyModelNodeTransforms) {
+                        binding.applyModelNodeTransforms = applyModelNodeTransforms != 0;
+
+                        int meshIndexCount = 0;
+                        if (stream >> meshIndexCount) {
+                            binding.modelMeshIndices.clear();
+                            binding.modelMeshIndices.reserve(static_cast<std::size_t>(std::max(0, meshIndexCount)));
+                            for (int meshIndexPosition = 0; meshIndexPosition < meshIndexCount; ++meshIndexPosition) {
+                                int meshIndex = -1;
+                                if (!(stream >> meshIndex)) {
+                                    break;
+                                }
+
+                                binding.modelMeshIndices.push_back(meshIndex);
+                            }
+                        }
+                    }
+                }
+
                 if (!binding.entityName.empty() && !binding.modelName.empty()) {
                     entityBindings.push_back(std::move(binding));
                 }
@@ -322,8 +414,32 @@ namespace Valkron {
             }
 
             entity->modelAssetName = binding.modelName;
+            entity->modelMeshIndices = binding.modelMeshIndices;
+            entity->applyModelNodeTransforms = binding.applyModelNodeTransforms;
             if (!binding.shaderName.empty()) {
                 AssetLoader::setModelShader(binding.modelName, binding.shaderName);
+            }
+
+            if (binding.hasShaderComponent) {
+                entity->shaderComponent.enabled = true;
+                entity->shaderComponent.shaderName = binding.componentShaderName.empty() ? binding.shaderName : binding.componentShaderName;
+                entity->shaderComponent.pbrMaterial.diffuseTextureAsset = binding.diffuseTextureAsset;
+                entity->shaderComponent.pbrMaterial.albedoTextureAsset = binding.albedoTextureAsset;
+                entity->shaderComponent.pbrMaterial.alphaTextureAsset = binding.alphaTextureAsset;
+                entity->shaderComponent.pbrMaterial.normalTextureAsset = binding.normalTextureAsset;
+                entity->shaderComponent.pbrMaterial.metallicTextureAsset = binding.metallicTextureAsset;
+                entity->shaderComponent.pbrMaterial.roughnessTextureAsset = binding.roughnessTextureAsset;
+                entity->shaderComponent.pbrMaterial.aoTextureAsset = binding.aoTextureAsset;
+                entity->shaderComponent.pbrMaterial.albedoColor = binding.albedoColor;
+                entity->shaderComponent.pbrMaterial.metallic = binding.metallic;
+                entity->shaderComponent.pbrMaterial.roughness = binding.roughness;
+                entity->shaderComponent.pbrMaterial.ambientOcclusion = binding.ambientOcclusion;
+
+                if (entity->shaderComponent.pbrMaterial.diffuseTextureAsset.empty()) {
+                    entity->shaderComponent.pbrMaterial.diffuseTextureAsset = entity->shaderComponent.pbrMaterial.albedoTextureAsset;
+                }
+            } else {
+                entity->shaderComponent = SceneShaderComponent{};
             }
 
             (void)entities;

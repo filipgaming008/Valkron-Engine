@@ -48,11 +48,7 @@ namespace Valkron {
         std::vector<glm::mat4> sceneEntityTransforms;
         std::vector<glm::vec3> lightEntityPositions;
         int selectedEntityRenderIndex = -1;
-
-        glm::vec3 directionalLightDirection = glm::normalize(glm::vec3(-0.40f, -1.00f, -0.30f));
-        glm::vec3 directionalLightColor{1.0f, 1.0f, 0.96f};
-        float directionalLightIntensity = 1.15f;
-        float directionalLightAmbientStrength = 0.24f;
+        SceneLightState sceneLight{};
 
         int viewportWidth = 0;
         int viewportHeight = 0;
@@ -151,16 +147,42 @@ namespace Valkron {
         const float editorExposure = sceneEditorView ? 1.32f : 1.00f;
         const float editorAmbientBoost = sceneEditorView ? 1.35f : 1.00f;
 
-        glm::vec3 directionalLightDirection = s_data.directionalLightDirection;
-        if (glm::length(directionalLightDirection) < 0.0001f) {
-            directionalLightDirection = glm::vec3(-0.40f, -1.00f, -0.30f);
+        SceneLightState activeLight = s_data.sceneLight;
+        if (glm::length(activeLight.direction) < 0.0001f) {
+            activeLight.direction = glm::vec3(-0.40f, -1.00f, -0.30f);
         }
-        directionalLightDirection = glm::normalize(directionalLightDirection);
+        activeLight.direction = glm::normalize(activeLight.direction);
+        activeLight.color = glm::vec3(
+            std::max(0.0f, activeLight.color.x),
+            std::max(0.0f, activeLight.color.y),
+            std::max(0.0f, activeLight.color.z)
+        );
+        activeLight.intensity = std::max(0.01f, activeLight.intensity);
+        activeLight.ambientStrength = std::clamp(activeLight.ambientStrength, 0.01f, 1.00f);
+        activeLight.range = std::max(0.25f, activeLight.range);
 
-        const glm::vec3 directionalLightColor = s_data.directionalLightColor * std::max(0.01f, s_data.directionalLightIntensity);
-        const float directionalAmbientStrength = std::clamp(s_data.directionalLightAmbientStrength * editorAmbientBoost, 0.02f, 0.90f);
+        const bool usePointLight = activeLight.enabled && activeLight.type == RenderLightType::Point;
+        const bool useDirectionalLight = activeLight.enabled && !usePointLight;
+
+        const glm::vec3 directionalLightColor = activeLight.color * activeLight.intensity;
+        const float directionalAmbientStrength = std::clamp(activeLight.ambientStrength * editorAmbientBoost, 0.02f, 0.90f);
+        const glm::vec3 pointLightColor = activeLight.color * activeLight.intensity;
+        const float pointLightAmbientStrength = std::clamp(activeLight.ambientStrength * editorAmbientBoost, 0.02f, 0.90f);
         const glm::vec3 cameraPosition = s_data.camera->getPosition();
         const glm::vec3 selectedHighlightColor(0.98f, 0.78f, 0.24f);
+
+        struct ResolvedModelDrawItem {
+            const SceneModelInstance* instance = nullptr;
+            std::shared_ptr<Model> model;
+            std::shared_ptr<Shader> shader;
+            std::string shaderName;
+            float cameraDistanceSquared = 0.0f;
+        };
+
+        std::vector<ResolvedModelDrawItem> opaqueItems;
+        std::vector<ResolvedModelDrawItem> transparentItems;
+        opaqueItems.reserve(modelInstances.size());
+        transparentItems.reserve(modelInstances.size());
 
         for (const SceneModelInstance& instance : modelInstances) {
             if (instance.modelName.empty()) {
@@ -173,7 +195,9 @@ namespace Valkron {
             }
 
             std::string shaderName;
-            if (sceneEditorView) {
+            if (instance.hasShaderComponent && !instance.shaderName.empty() && AssetLoader::getShader(instance.shaderName) != nullptr) {
+                shaderName = instance.shaderName;
+            } else if (sceneEditorView) {
                 shaderName = "Blinn-Phong";
                 if (AssetLoader::getShader(shaderName) == nullptr) {
                     shaderName = AssetLoader::getModelShader(instance.modelName);
@@ -187,21 +211,131 @@ namespace Valkron {
                 continue;
             }
 
+            bool requiresTransparentPass = model->hasTransparentMaterials();
+            if (!requiresTransparentPass && (shaderName == "PBR" || shaderName == "Blinn-Phong")) {
+                const std::string diffuseTextureName = !instance.pbrDiffuseTexture.empty() ? instance.pbrDiffuseTexture : instance.pbrAlbedoTexture;
+                if (!diffuseTextureName.empty()) {
+                    const std::shared_ptr<Texture> diffuseTexture = AssetLoader::getTexture2D(diffuseTextureName);
+                    if (diffuseTexture != nullptr && diffuseTexture->getChannels() == 4) {
+                        requiresTransparentPass = true;
+                    }
+                }
+
+                if (!requiresTransparentPass && !instance.pbrAlphaTexture.empty()) {
+                    requiresTransparentPass = true;
+                }
+            }
+
+            const glm::vec3 instanceWorldPosition(instance.transform[3].x, instance.transform[3].y, instance.transform[3].z);
+            const glm::vec3 toCamera = cameraPosition - instanceWorldPosition;
+
+            ResolvedModelDrawItem drawItem;
+            drawItem.instance = &instance;
+            drawItem.model = model;
+            drawItem.shader = shader;
+            drawItem.shaderName = shaderName;
+            drawItem.cameraDistanceSquared = glm::dot(toCamera, toCamera);
+
+            if (requiresTransparentPass) {
+                transparentItems.push_back(std::move(drawItem));
+            } else {
+                opaqueItems.push_back(std::move(drawItem));
+            }
+        }
+
+        std::sort(transparentItems.begin(), transparentItems.end(), [](const ResolvedModelDrawItem& lhs, const ResolvedModelDrawItem& rhs) {
+            return lhs.cameraDistanceSquared > rhs.cameraDistanceSquared;
+        });
+
+        const auto renderDrawItem = [&](const ResolvedModelDrawItem& drawItem) {
+            const SceneModelInstance& instance = *drawItem.instance;
+            const std::shared_ptr<Shader>& shader = drawItem.shader;
+            const std::string& shaderName = drawItem.shaderName;
+
             shader->bind();
             shader->setMat4("u_View", glm::value_ptr(viewMatrix));
             shader->setMat4("u_Projection", glm::value_ptr(projectionMatrix));
-            shader->setInt("u_DirectionalLight.enabled", 1);
-            shader->setVec3("u_DirectionalLight.direction", &directionalLightDirection.x);
+            shader->setInt("u_LightType", usePointLight ? 1 : 0);
+            shader->setInt("u_DirectionalLight.enabled", useDirectionalLight ? 1 : 0);
+            shader->setVec3("u_DirectionalLight.direction", &activeLight.direction.x);
             shader->setVec3("u_DirectionalLight.color", &directionalLightColor.x);
-            shader->setFloat("u_DirectionalLight.intensity", std::max(0.01f, s_data.directionalLightIntensity));
+            shader->setFloat("u_DirectionalLight.intensity", activeLight.intensity);
             shader->setFloat("u_DirectionalLight.ambientStrength", directionalAmbientStrength);
+            shader->setInt("u_PointLight.enabled", usePointLight ? 1 : 0);
+            shader->setVec3("u_PointLight.position", &activeLight.position.x);
+            shader->setVec3("u_PointLight.color", &pointLightColor.x);
+            shader->setFloat("u_PointLight.intensity", activeLight.intensity);
+            shader->setFloat("u_PointLight.ambientStrength", pointLightAmbientStrength);
+            shader->setFloat("u_PointLight.range", activeLight.range);
             shader->setFloat("u_EditorExposure", editorExposure);
             shader->setVec3("u_ViewPos", &cameraPosition.x);
 
-            shader->setMat4("u_Model", glm::value_ptr(instance.transform));
+            std::vector<std::shared_ptr<Texture>> pbrTexturesToUnbind;
+            const auto bindShaderTexture = [&](const std::string& textureName, const char* hasMapUniform, const char* mapUniform, unsigned int slot) {
+                if (textureName.empty()) {
+                    shader->setInt(hasMapUniform, 0);
+                    return;
+                }
+
+                std::shared_ptr<Texture> texture = AssetLoader::getTexture2D(textureName);
+                if (texture == nullptr) {
+                    shader->setInt(hasMapUniform, 0);
+                    return;
+                }
+
+                texture->bind(slot);
+                shader->setInt(hasMapUniform, 1);
+                shader->setInt(mapUniform, static_cast<int>(slot));
+                pbrTexturesToUnbind.push_back(std::move(texture));
+            };
+
+            if (shaderName == "PBR") {
+                const glm::vec3 pbrAlbedoColor(
+                    std::clamp(instance.pbrAlbedoColor.x, 0.0f, 1.0f),
+                    std::clamp(instance.pbrAlbedoColor.y, 0.0f, 1.0f),
+                    std::clamp(instance.pbrAlbedoColor.z, 0.0f, 1.0f)
+                );
+
+                shader->setVec3("u_PbrMaterial.albedoColor", &pbrAlbedoColor.x);
+                shader->setFloat("u_PbrMaterial.metallic", std::clamp(instance.pbrMetallic, 0.0f, 1.0f));
+                shader->setFloat("u_PbrMaterial.roughness", std::clamp(instance.pbrRoughness, 0.04f, 1.0f));
+                shader->setFloat("u_PbrMaterial.ao", std::clamp(instance.pbrAmbientOcclusion, 0.0f, 1.0f));
+
+                const std::string diffuseTextureName = !instance.pbrDiffuseTexture.empty() ? instance.pbrDiffuseTexture : instance.pbrAlbedoTexture;
+                bindShaderTexture(diffuseTextureName, "u_PbrMaterial.hasAlbedoMap", "u_PbrMaterial.albedoMap", 4);
+                bindShaderTexture(instance.pbrNormalTexture, "u_PbrMaterial.hasNormalMap", "u_PbrMaterial.normalMap", 5);
+                bindShaderTexture(instance.pbrMetallicTexture, "u_PbrMaterial.hasMetallicMap", "u_PbrMaterial.metallicMap", 6);
+                bindShaderTexture(instance.pbrRoughnessTexture, "u_PbrMaterial.hasRoughnessMap", "u_PbrMaterial.roughnessMap", 7);
+                bindShaderTexture(instance.pbrAOTexture, "u_PbrMaterial.hasAoMap", "u_PbrMaterial.aoMap", 8);
+                bindShaderTexture(instance.pbrAlphaTexture, "u_PbrMaterial.hasAlphaMap", "u_PbrMaterial.alphaMap", 9);
+            } else if (shaderName == "Blinn-Phong") {
+                const std::string diffuseTextureName = !instance.pbrDiffuseTexture.empty() ? instance.pbrDiffuseTexture : instance.pbrAlbedoTexture;
+                bindShaderTexture(diffuseTextureName, "u_OverrideDiffuseMapEnabled", "u_OverrideDiffuseMap", 10);
+                bindShaderTexture(instance.pbrAlphaTexture, "u_OverrideAlphaMapEnabled", "u_OverrideAlphaMap", 11);
+            }
+
             shader->setVec3("u_SelectionColor", &selectedHighlightColor.x);
             shader->setFloat("u_SelectionMix", (sceneEditorView && instance.selected) ? 0.38f : 0.0f);
-            model->draw(*shader);
+            drawItem.model->draw(*shader, instance.transform, instance.modelMeshIndices, instance.applyModelNodeTransforms);
+
+            for (const std::shared_ptr<Texture>& texture : pbrTexturesToUnbind) {
+                if (texture != nullptr) {
+                    texture->unbind();
+                }
+            }
+        };
+
+        glDepthMask(GL_TRUE);
+        for (const ResolvedModelDrawItem& drawItem : opaqueItems) {
+            renderDrawItem(drawItem);
+        }
+
+        if (!transparentItems.empty()) {
+            glDepthMask(GL_FALSE);
+            for (const ResolvedModelDrawItem& drawItem : transparentItems) {
+                renderDrawItem(drawItem);
+            }
+            glDepthMask(GL_TRUE);
         }
     }
 
@@ -257,6 +391,7 @@ namespace Valkron {
         s_data.sceneEntityTransforms.clear();
         s_data.lightEntityPositions.clear();
         s_data.selectedEntityRenderIndex = -1;
+        s_data.sceneLight = SceneLightState{};
 
         s_data.frameBuffer = std::make_unique<FrameBuffer>();
         s_data.frameTexture = std::make_unique<Texture>();
@@ -311,6 +446,7 @@ namespace Valkron {
         s_data.sceneEntityTransforms.clear();
         s_data.lightEntityPositions.clear();
         s_data.selectedEntityRenderIndex = -1;
+        s_data.sceneLight = SceneLightState{};
         s_data.viewportWidth = 0;
         s_data.viewportHeight = 0;
         s_data.windowFramebufferWidth = 0;
@@ -433,22 +569,41 @@ namespace Valkron {
         s_data.lightEntityPositions = lightPositions;
     }
 
+    void Renderer::setSceneLight(const SceneLightState& lightState) {
+        if (!s_data.initialized) {
+            return;
+        }
+
+        s_data.sceneLight = lightState;
+        if (glm::length(s_data.sceneLight.direction) > 0.0001f) {
+            s_data.sceneLight.direction = glm::normalize(s_data.sceneLight.direction);
+        } else {
+            s_data.sceneLight.direction = glm::vec3(-0.40f, -1.00f, -0.30f);
+        }
+
+        s_data.sceneLight.color = glm::vec3(
+            std::max(0.0f, s_data.sceneLight.color.x),
+            std::max(0.0f, s_data.sceneLight.color.y),
+            std::max(0.0f, s_data.sceneLight.color.z)
+        );
+        s_data.sceneLight.intensity = std::max(0.01f, s_data.sceneLight.intensity);
+        s_data.sceneLight.ambientStrength = std::clamp(s_data.sceneLight.ambientStrength, 0.01f, 1.00f);
+        s_data.sceneLight.range = std::max(0.25f, s_data.sceneLight.range);
+    }
+
     void Renderer::setDirectionalLight(const glm::vec3& direction, const glm::vec3& color, float intensity, float ambientStrength) {
         if (!s_data.initialized) {
             return;
         }
 
-        if (glm::length(direction) > 0.0001f) {
-            s_data.directionalLightDirection = glm::normalize(direction);
-        }
-
-        s_data.directionalLightColor = glm::vec3(
-            std::max(0.0f, color.x),
-            std::max(0.0f, color.y),
-            std::max(0.0f, color.z)
-        );
-        s_data.directionalLightIntensity = std::max(0.01f, intensity);
-        s_data.directionalLightAmbientStrength = std::clamp(ambientStrength, 0.01f, 1.00f);
+        SceneLightState lightState = s_data.sceneLight;
+        lightState.type = RenderLightType::Directional;
+        lightState.enabled = true;
+        lightState.direction = direction;
+        lightState.color = color;
+        lightState.intensity = intensity;
+        lightState.ambientStrength = ambientStrength;
+        setSceneLight(lightState);
     }
 
     glm::vec3 Renderer::getCameraPosition() {

@@ -17,6 +17,8 @@ namespace Valkron {
         glm::vec3 diffuseColor{1.0f, 1.0f, 1.0f};
         glm::vec3 specularColor{1.0f, 1.0f, 1.0f};
         float shininess = 32.0f;
+        float opacity = 1.0f;
+        bool hasAlphaTexture = false;
         std::shared_ptr<Texture> diffuseTexture = nullptr;
         std::shared_ptr<Texture> specularTexture = nullptr;
         std::shared_ptr<Texture> normalTexture = nullptr;
@@ -30,6 +32,11 @@ namespace Valkron {
                 std::unique_ptr<VertexBuffer> vertexBuffer;
                 std::unique_ptr<IndexBuffer> indexBuffer;
                 ModelMaterial material;
+                int sourceMeshIndex = -1;
+                glm::mat4 nodeTransform{1.0f};
+                glm::vec3 rawLocalBoundsMin{0.0f, 0.0f, 0.0f};
+                glm::vec3 rawLocalBoundsMax{0.0f, 0.0f, 0.0f};
+                bool hasRawLocalBounds = false;
                 glm::vec3 localBoundsMin{0.0f, 0.0f, 0.0f};
                 glm::vec3 localBoundsMax{0.0f, 0.0f, 0.0f};
                 bool hasLocalBounds = false;
@@ -51,9 +58,22 @@ namespace Valkron {
 
             bool loadFromFile(const std::string& modelPath);
             void draw(const Shader& shader) const;
+            void draw(
+                const Shader& shader,
+                const glm::mat4& baseTransform,
+                const std::vector<int>& meshIndices,
+                bool applyNodeTransforms
+            ) const;
             bool getLocalBounds(glm::vec3& outMin, glm::vec3& outMax) const;
+            bool getLocalBounds(
+                glm::vec3& outMin,
+                glm::vec3& outMax,
+                const std::vector<int>& meshIndices,
+                bool applyNodeTransforms
+            ) const;
 
             bool isLoaded() const { return !m_meshes.empty(); }
+            bool hasTransparentMaterials() const { return m_hasTransparentMaterials; }
             const std::string& getPath() const { return m_modelPath; }
             const std::vector<std::string>& getReferencedTexturePaths() const { return m_referencedTexturePaths; }
 
@@ -64,6 +84,7 @@ namespace Valkron {
             glm::vec3 m_localBoundsMin{0.0f, 0.0f, 0.0f};
             glm::vec3 m_localBoundsMax{0.0f, 0.0f, 0.0f};
             bool m_hasLocalBounds = false;
+                bool m_hasTransparentMaterials = false;
     };
 
 }

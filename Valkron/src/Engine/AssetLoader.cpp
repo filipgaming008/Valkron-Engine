@@ -80,7 +80,7 @@ namespace Valkron {
         }
 
         auto texture = std::make_shared<Texture>();
-        if (!texture->loadTexture(texturePath)) {
+        if (!texture->loadTexture(texturePath, false)) {
             LOG_ERROR("Failed to load 2D texture asset '" + name + "' from " + texturePath);
             return false;
         }
@@ -265,13 +265,19 @@ namespace Valkron {
 
         loadShader("Textured", "assets/shaders/textured.vert", "assets/shaders/textured.frag");
         loadShader("Blinn-Phong", "assets/shaders/blinn_phong.vert", "assets/shaders/blinn_phong.frag");
+        loadShader("PBR", "assets/shaders/pbr.vert", "assets/shaders/pbr.frag");
         loadComputeShader("DefaultCompute", "assets/shaders/default_compute.comp");
 
         loadModel("Test Model", "assets/models/test_cube.obj");
+        loadModel("Teapot", "assets/models/teapot.obj");
 
         if (s_models.find("Test Model") != s_models.end()) {
             s_activeModelName = "Test Model";
             setModelShader("Test Model", "Blinn-Phong");
+        }
+        if (s_models.find("Teapot") != s_models.end()) {
+            s_activeModelName = "Teapot";
+            setModelShader("Teapot", "Blinn-Phong");
         }
     }
 

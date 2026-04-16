@@ -1,5 +1,12 @@
 ﻿#include "Application/UI/Panels/UILayerPanelsInternal.hpp"
 
+#include <assimp/Importer.hpp>
+#include <assimp/postprocess.h>
+#include <assimp/scene.h>
+
+#include <cctype>
+#include <filesystem>
+
 #define IMVIEWGUIZMO_IMPLEMENTATION
 #define ImLengthSqr ImViewGuizmo_ImLengthSqr
 #include "ImViewGuizmo.h"
@@ -8,6 +15,152 @@
 #include "glm/gtx/quaternion.hpp"
 
 namespace Valkron {
+
+    namespace {
+
+        struct ImportedModelHierarchyNode {
+            std::string nodeName;
+            std::optional<std::size_t> parentNodeIndex;
+            SceneTransform localTransform{};
+            std::vector<int> meshIndices;
+        };
+
+        std::string sanitizeHierarchyEntityName(std::string value) {
+            if (value.empty()) {
+                return value;
+            }
+
+            std::transform(value.begin(), value.end(), value.begin(), [](unsigned char ch) {
+                if (ch == '\\' || ch == '/' || ch == ':' || ch == '*' || ch == '?' || ch == '"' || ch == '<' || ch == '>' || ch == '|') {
+                    return static_cast<char>('_');
+                }
+
+                if (std::iscntrl(ch)) {
+                    return static_cast<char>('_');
+                }
+
+                return static_cast<char>(ch);
+            });
+
+            return value;
+        }
+
+        SceneTransform convertAssimpTransformToSceneTransform(const aiMatrix4x4& assimpTransform) {
+            aiVector3D scaling;
+            aiQuaternion rotation;
+            aiVector3D position;
+            assimpTransform.Decompose(scaling, rotation, position);
+
+            SceneTransform transform{};
+            transform.position = glm::vec3(position.x, position.y, position.z);
+
+            glm::quat orientation(rotation.w, rotation.x, rotation.y, rotation.z);
+            if (glm::length(orientation) > 0.0001f) {
+                orientation = glm::normalize(orientation);
+            } else {
+                orientation = glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
+            }
+
+            const glm::mat4 rotationMatrix = glm::mat4_cast(orientation);
+            const float r00 = rotationMatrix[0][0];
+            const float r01 = rotationMatrix[1][0];
+            const float r02 = rotationMatrix[2][0];
+            const float r10 = rotationMatrix[0][1];
+            const float r11 = rotationMatrix[1][1];
+            const float r12 = rotationMatrix[2][1];
+            const float r22 = rotationMatrix[2][2];
+
+            float xRadians = 0.0f;
+            float yRadians = 0.0f;
+            float zRadians = 0.0f;
+
+            const float clampedR02 = std::clamp(r02, -1.0f, 1.0f);
+            yRadians = std::asin(clampedR02);
+
+            constexpr float kGimbalThreshold = 0.9999f;
+            if (std::abs(clampedR02) < kGimbalThreshold) {
+                xRadians = std::atan2(-r12, r22);
+                zRadians = std::atan2(-r01, r00);
+            } else {
+                zRadians = 0.0f;
+                if (clampedR02 > 0.0f) {
+                    xRadians = std::atan2(r10, r11);
+                } else {
+                    xRadians = std::atan2(-r10, r11);
+                }
+            }
+
+            transform.rotation = glm::degrees(glm::vec3(xRadians, yRadians, zRadians));
+            transform.scale = glm::vec3(scaling.x, scaling.y, scaling.z);
+            return transform;
+        }
+
+        void collectImportedModelHierarchyNodes(
+            const aiNode* node,
+            std::optional<std::size_t> parentNodeIndex,
+            const std::string& fallbackModelName,
+            std::vector<ImportedModelHierarchyNode>& outNodes
+        ) {
+            if (node == nullptr) {
+                return;
+            }
+
+            const std::size_t nodeIndex = outNodes.size();
+
+            ImportedModelHierarchyNode hierarchyNode{};
+            hierarchyNode.parentNodeIndex = parentNodeIndex;
+            hierarchyNode.localTransform = convertAssimpTransformToSceneTransform(node->mTransformation);
+            hierarchyNode.meshIndices.reserve(node->mNumMeshes);
+            for (unsigned int meshPosition = 0; meshPosition < node->mNumMeshes; ++meshPosition) {
+                hierarchyNode.meshIndices.push_back(static_cast<int>(node->mMeshes[meshPosition]));
+            }
+
+            if (node->mName.length > 0 && node->mName.C_Str() != nullptr) {
+                hierarchyNode.nodeName = sanitizeHierarchyEntityName(node->mName.C_Str());
+            }
+
+            if (hierarchyNode.nodeName.empty()) {
+                hierarchyNode.nodeName = sanitizeHierarchyEntityName(
+                    fallbackModelName + "_Node_" + std::to_string(nodeIndex)
+                );
+            }
+
+            outNodes.push_back(std::move(hierarchyNode));
+
+            for (unsigned int childIndex = 0; childIndex < node->mNumChildren; ++childIndex) {
+                collectImportedModelHierarchyNodes(node->mChildren[childIndex], nodeIndex, fallbackModelName, outNodes);
+            }
+        }
+
+        bool buildImportedModelHierarchyNodes(
+            const std::string& modelPath,
+            const std::string& modelName,
+            std::vector<ImportedModelHierarchyNode>& outNodes,
+            std::string& outError
+        ) {
+            outNodes.clear();
+            outError.clear();
+
+            Assimp::Importer importer;
+            const aiScene* scene = importer.ReadFile(
+                modelPath,
+                aiProcess_Triangulate |
+                aiProcess_GenSmoothNormals |
+                aiProcess_FlipUVs |
+                aiProcess_JoinIdenticalVertices |
+                aiProcess_CalcTangentSpace
+            );
+
+            if (scene == nullptr || scene->mRootNode == nullptr || (scene->mFlags & AI_SCENE_FLAGS_INCOMPLETE) != 0) {
+                outError = importer.GetErrorString();
+                return false;
+            }
+
+            collectImportedModelHierarchyNodes(scene->mRootNode, std::nullopt, deriveAssetBaseName(modelName, "Model"), outNodes);
+            return !outNodes.empty();
+        }
+
+    }  // namespace
 
     void UILayer::drawSceneViewPanel(float deltaTime) {
         const ImGuiWindowFlags windowFlags = ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse;
@@ -276,37 +429,127 @@ namespace Valkron {
                 if (payload->Data != nullptr && payload->DataSize > 0) {
                     const std::string modelName(static_cast<const char*>(payload->Data));
                     if (!modelName.empty()) {
-                        std::shared_ptr<Model> model = AssetLoader::getModel(modelName);
-                        if (model == nullptr || !model->isLoaded()) {
+                        std::string modelAssetPath;
+                        {
                             const auto& assets = m_activeScene.getAssets();
                             const auto assetIt = std::find_if(assets.begin(), assets.end(), [&modelName](const SceneAsset& asset) {
                                 return asset.name == modelName && isModelSceneAsset(asset);
                             });
 
                             if (assetIt != assets.end()) {
-                                AssetLoader::loadModel(modelName, assetIt->path);
+                                modelAssetPath = assetIt->path;
+                            }
+                        }
+
+                        std::shared_ptr<Model> model = AssetLoader::getModel(modelName);
+                        if (model == nullptr || !model->isLoaded()) {
+                            if (!modelAssetPath.empty()) {
+                                AssetLoader::loadModel(modelName, modelAssetPath);
                                 model = AssetLoader::getModel(modelName);
                             }
                         }
 
                         if (model != nullptr && model->isLoaded()) {
-                            const std::string entityName = m_activeScene.makeUniqueEntityName(deriveAssetBaseName(modelName, "Model"));
-                            m_activeScene.addEntity(entityName, SceneEntityType::Generic);
+                            const glm::vec3 placementPosition = m_runtimeEntityCameraActive ? Renderer::getCameraTarget() : m_sceneCameraPivot;
+                            bool placedAsHierarchy = false;
 
-                            const std::optional<std::size_t> entityIndex = m_activeScene.findEntityIndex(entityName);
-                            if (entityIndex.has_value()) {
-                                if (SceneEntity* entity = m_activeScene.getEntityByIndex(entityIndex.value()); entity != nullptr) {
-                                    entity->modelAssetName = modelName;
-                                    entity->transform.position = m_runtimeEntityCameraActive ? Renderer::getCameraTarget() : m_sceneCameraPivot;
-                                    entity->transform.rotation = glm::vec3(0.0f, 0.0f, 0.0f);
-                                    entity->transform.scale = glm::vec3(1.0f, 1.0f, 1.0f);
-                                    entity->transform.size = glm::vec3(1.0f, 1.0f, 1.0f);
+                            const std::string modelExtension = toLowercase(std::filesystem::path(modelAssetPath).extension().string());
+                            if (!modelAssetPath.empty() && modelExtension == ".fbx") {
+                                std::vector<ImportedModelHierarchyNode> importedHierarchyNodes;
+                                std::string hierarchyImportError;
+                                if (buildImportedModelHierarchyNodes(modelAssetPath, modelName, importedHierarchyNodes, hierarchyImportError)) {
+                                    if (importedHierarchyNodes.size() > 1) {
+                                        std::vector<std::size_t> sceneEntityIndices(importedHierarchyNodes.size(), std::numeric_limits<std::size_t>::max());
+                                        for (std::size_t nodeIndex = 0; nodeIndex < importedHierarchyNodes.size(); ++nodeIndex) {
+                                            const ImportedModelHierarchyNode& importedNode = importedHierarchyNodes[nodeIndex];
+                                            const std::string baseEntityName = importedNode.nodeName.empty()
+                                                ? deriveAssetBaseName(modelName, "ModelNode")
+                                                : importedNode.nodeName;
+
+                                            const std::string entityName = m_activeScene.makeUniqueEntityName(baseEntityName);
+                                            m_activeScene.addEntity(entityName, SceneEntityType::Generic);
+
+                                            const std::optional<std::size_t> entityIndex = m_activeScene.findEntityIndex(entityName);
+                                            if (!entityIndex.has_value()) {
+                                                continue;
+                                            }
+
+                                            sceneEntityIndices[nodeIndex] = entityIndex.value();
+                                            if (SceneEntity* entity = m_activeScene.getEntityByIndex(entityIndex.value()); entity != nullptr) {
+                                                entity->transform = importedNode.localTransform;
+
+                                                if (!importedNode.meshIndices.empty()) {
+                                                    entity->modelAssetName = modelName;
+                                                    entity->modelMeshIndices = importedNode.meshIndices;
+                                                    entity->applyModelNodeTransforms = false;
+                                                    ensureEntityUsesPbrComponent(*entity);
+                                                } else {
+                                                    entity->modelAssetName.clear();
+                                                    entity->modelMeshIndices.clear();
+                                                    entity->applyModelNodeTransforms = true;
+                                                }
+                                            }
+                                        }
+
+                                        for (std::size_t nodeIndex = 0; nodeIndex < importedHierarchyNodes.size(); ++nodeIndex) {
+                                            const ImportedModelHierarchyNode& importedNode = importedHierarchyNodes[nodeIndex];
+                                            if (!importedNode.parentNodeIndex.has_value()) {
+                                                continue;
+                                            }
+
+                                            const std::size_t childEntityIndex = sceneEntityIndices[nodeIndex];
+                                            const std::size_t parentEntityIndex = sceneEntityIndices[importedNode.parentNodeIndex.value()];
+                                            if (childEntityIndex == std::numeric_limits<std::size_t>::max() || parentEntityIndex == std::numeric_limits<std::size_t>::max()) {
+                                                continue;
+                                            }
+
+                                            (void)m_activeScene.setEntityParent(childEntityIndex, parentEntityIndex);
+                                        }
+
+                                        const std::size_t rootEntityIndex = sceneEntityIndices.front();
+                                        if (rootEntityIndex != std::numeric_limits<std::size_t>::max()) {
+                                            if (SceneEntity* rootEntity = m_activeScene.getEntityByIndex(rootEntityIndex); rootEntity != nullptr) {
+                                                rootEntity->transform.position += placementPosition;
+                                            }
+
+                                            setSelectedEntity(static_cast<int>(rootEntityIndex));
+                                        }
+
+                                        appendTerminalLine(
+                                            "Placed hierarchical FBX entity tree for " + modelName +
+                                            " (" + std::to_string(importedHierarchyNodes.size()) + " nodes)."
+                                        );
+                                        placedAsHierarchy = true;
+                                    }
+                                } else if (!hierarchyImportError.empty()) {
+                                    appendTerminalLine(
+                                        "FBX hierarchy import fallback for " + modelName + ": " + hierarchyImportError
+                                    );
                                 }
-
-                                setSelectedEntity(static_cast<int>(entityIndex.value()));
                             }
 
-                            appendTerminalLine("Placed model entity " + entityName + " from asset " + modelName + ".");
+                            if (!placedAsHierarchy) {
+                                const std::string entityName = m_activeScene.makeUniqueEntityName(deriveAssetBaseName(modelName, "Model"));
+                                m_activeScene.addEntity(entityName, SceneEntityType::Generic);
+
+                                const std::optional<std::size_t> entityIndex = m_activeScene.findEntityIndex(entityName);
+                                if (entityIndex.has_value()) {
+                                    if (SceneEntity* entity = m_activeScene.getEntityByIndex(entityIndex.value()); entity != nullptr) {
+                                        entity->modelAssetName = modelName;
+                                        entity->modelMeshIndices.clear();
+                                        entity->applyModelNodeTransforms = true;
+                                        entity->transform.position = placementPosition;
+                                        entity->transform.rotation = glm::vec3(0.0f, 0.0f, 0.0f);
+                                        entity->transform.scale = glm::vec3(1.0f, 1.0f, 1.0f);
+                                        entity->transform.size = glm::vec3(1.0f, 1.0f, 1.0f);
+                                        ensureEntityUsesPbrComponent(*entity);
+                                    }
+
+                                    setSelectedEntity(static_cast<int>(entityIndex.value()));
+                                }
+
+                                appendTerminalLine("Placed model entity " + entityName + " from asset " + modelName + ".");
+                            }
                         } else {
                             appendTerminalLine("Unable to place model asset: " + modelName + ".");
                         }
@@ -445,6 +688,73 @@ namespace Valkron {
                         ImVec2(badgeMax.x + 4.0f, badgeMax.y + 4.0f)
                     });
                 }
+
+                const bool directionalLightEntity = lightEntity && entity.lightComponent.type == SceneLightType::Directional;
+                const bool drawForwardArrow = selected && (cameraEntity || directionalLightEntity);
+                if (drawForwardArrow) {
+                    glm::vec3 forwardDirection = glm::mat3(worldTransform) * glm::vec3(0.0f, 0.0f, -1.0f);
+                    if (glm::length(forwardDirection) <= 0.0001f) {
+                        forwardDirection = glm::vec3(0.0f, 0.0f, -1.0f);
+                    } else {
+                        forwardDirection = glm::normalize(forwardDirection);
+                    }
+
+                    if (directionalLightEntity) {
+                        const bool hasExplicitRotation = glm::length(entity.transform.rotation) > 0.001f;
+                        if (!hasExplicitRotation && glm::length(worldPosition) > 0.001f) {
+                            forwardDirection = glm::normalize(-worldPosition);
+                        }
+                    }
+
+                    const glm::vec3 cameraPosition = Renderer::getCameraPosition();
+                    const float distanceToCamera = glm::length(cameraPosition - worldPosition);
+                    const float arrowLengthWorld = std::clamp(distanceToCamera * 0.10f, 0.35f, 3.5f);
+                    const glm::vec3 arrowTipWorld = worldPosition + forwardDirection * arrowLengthWorld;
+
+                    const std::optional<std::pair<ImVec2, ImVec2>> projectedArrow = projectWorldLineToImageClipped(
+                        worldPosition,
+                        arrowTipWorld,
+                        viewMatrix,
+                        projectionMatrix,
+                        imageRectMin,
+                        imageRectMax,
+                        0.02f
+                    );
+
+                    if (projectedArrow.has_value()) {
+                        const ImVec2 arrowStart = projectedArrow->first;
+                        const ImVec2 arrowEnd = projectedArrow->second;
+
+                        const float dx = arrowEnd.x - arrowStart.x;
+                        const float dy = arrowEnd.y - arrowStart.y;
+                        const float lineLength = std::sqrt(dx * dx + dy * dy);
+                        if (lineLength > 2.0f) {
+                            const ImVec2 direction(dx / lineLength, dy / lineLength);
+                            const ImVec2 perpendicular(-direction.y, direction.x);
+                            const float arrowHeadLength = std::clamp(lineLength * 0.30f, 8.0f, 16.0f);
+                            const float arrowHeadHalfWidth = arrowHeadLength * 0.45f;
+
+                            const ImVec2 arrowHeadLeft(
+                                arrowEnd.x - direction.x * arrowHeadLength + perpendicular.x * arrowHeadHalfWidth,
+                                arrowEnd.y - direction.y * arrowHeadLength + perpendicular.y * arrowHeadHalfWidth
+                            );
+                            const ImVec2 arrowHeadRight(
+                                arrowEnd.x - direction.x * arrowHeadLength - perpendicular.x * arrowHeadHalfWidth,
+                                arrowEnd.y - direction.y * arrowHeadLength - perpendicular.y * arrowHeadHalfWidth
+                            );
+
+                            const ImU32 arrowColor = cameraEntity
+                                ? IM_COL32(106, 184, 255, 245)
+                                : IM_COL32(255, 224, 118, 245);
+                            const ImU32 arrowOutlineColor = IM_COL32(18, 20, 22, 210);
+
+                            drawList->AddLine(arrowStart, arrowEnd, arrowOutlineColor, 4.4f);
+                            drawList->AddLine(arrowStart, arrowEnd, arrowColor, 2.6f);
+                            drawList->AddTriangleFilled(arrowEnd, arrowHeadLeft, arrowHeadRight, arrowColor);
+                            drawList->AddTriangle(arrowEnd, arrowHeadLeft, arrowHeadRight, arrowOutlineColor, 1.0f);
+                        }
+                    }
+                }
             }
 
             drawList->PopClipRect();
@@ -568,48 +878,52 @@ namespace Valkron {
                     float nearestDistance = std::numeric_limits<float>::max();
 
                     for (std::size_t entityIndex = 0; entityIndex < currentEntities.size(); ++entityIndex) {
-                        const glm::mat4 worldTransform = composeEntityWorldTransformMatrix(currentEntities, entityIndex);
-                        std::optional<float> hitDistance;
-
                         const SceneEntity& entity = currentEntities[entityIndex];
-                        if (!entity.modelAssetName.empty()) {
-                            const std::shared_ptr<Model> model = AssetLoader::getModel(entity.modelAssetName);
-                            if (model != nullptr && model->isLoaded()) {
-                                glm::vec3 localBoundsMin;
-                                glm::vec3 localBoundsMax;
-                                if (model->getLocalBounds(localBoundsMin, localBoundsMax)) {
-                                    const glm::mat4 inverseWorldTransform = glm::inverse(worldTransform);
-                                    const glm::vec3 localRayOrigin = glm::vec3(inverseWorldTransform * glm::vec4(rayOrigin, 1.0f));
-                                    glm::vec3 localRayDirection = glm::vec3(inverseWorldTransform * glm::vec4(rayDirection, 0.0f));
-
-                                    if (glm::length(localRayDirection) > 0.0001f) {
-                                        localRayDirection = glm::normalize(localRayDirection);
-                                        const std::optional<float> localHitDistance = rayAabbIntersectionDistance(localRayOrigin, localRayDirection, localBoundsMin, localBoundsMax);
-                                        if (localHitDistance.has_value()) {
-                                            const glm::vec3 localHitPosition = localRayOrigin + localRayDirection * localHitDistance.value();
-                                            const glm::vec3 worldHitPosition = glm::vec3(worldTransform * glm::vec4(localHitPosition, 1.0f));
-                                            hitDistance = glm::length(worldHitPosition - rayOrigin);
-                                        }
-                                    }
-                                }
-                            }
+                        if (isCameraEntity(entity) || isLightEntity(entity) || entity.modelAssetName.empty()) {
+                            continue;
                         }
 
-                        if (!hitDistance.has_value()) {
-                            const glm::vec3 entityCenter = extractWorldPosition(worldTransform);
-
-                            const SceneTransform& transform = entity.transform;
-                            const glm::vec3 extents(
-                                std::max(0.05f, std::abs(transform.size.x * transform.scale.x)),
-                                std::max(0.05f, std::abs(transform.size.y * transform.scale.y)),
-                                std::max(0.05f, std::abs(transform.size.z * transform.scale.z))
-                            );
-                            const float sphereRadius = std::max(0.2f, 0.5f * std::max({extents.x, extents.y, extents.z}));
-                            hitDistance = raySphereIntersectionDistance(rayOrigin, rayDirection, entityCenter, sphereRadius);
+                        const std::shared_ptr<Model> model = AssetLoader::getModel(entity.modelAssetName);
+                        if (model == nullptr || !model->isLoaded()) {
+                            continue;
                         }
 
-                        if (hitDistance.has_value() && hitDistance.value() < nearestDistance) {
-                            nearestDistance = hitDistance.value();
+                        glm::vec3 localBoundsMin;
+                        glm::vec3 localBoundsMax;
+                        if (!model->getLocalBounds(
+                                localBoundsMin,
+                                localBoundsMax,
+                                entity.modelMeshIndices,
+                                entity.applyModelNodeTransforms
+                            )) {
+                            continue;
+                        }
+
+                        const glm::mat4 worldTransform = composeEntityWorldTransformMatrix(currentEntities, entityIndex);
+                        const glm::mat4 inverseWorldTransform = glm::inverse(worldTransform);
+                        const glm::vec3 localRayOrigin = glm::vec3(inverseWorldTransform * glm::vec4(rayOrigin, 1.0f));
+                        glm::vec3 localRayDirection = glm::vec3(inverseWorldTransform * glm::vec4(rayDirection, 0.0f));
+                        if (glm::length(localRayDirection) <= 0.0001f) {
+                            continue;
+                        }
+
+                        localRayDirection = glm::normalize(localRayDirection);
+                        const std::optional<float> localHitDistance = rayAabbIntersectionDistance(
+                            localRayOrigin,
+                            localRayDirection,
+                            localBoundsMin,
+                            localBoundsMax
+                        );
+                        if (!localHitDistance.has_value()) {
+                            continue;
+                        }
+
+                        const glm::vec3 localHitPosition = localRayOrigin + localRayDirection * localHitDistance.value();
+                        const glm::vec3 worldHitPosition = glm::vec3(worldTransform * glm::vec4(localHitPosition, 1.0f));
+                        const float hitDistance = glm::length(worldHitPosition - rayOrigin);
+
+                        if (hitDistance < nearestDistance) {
+                            nearestDistance = hitDistance;
                             pickedEntityIndex = static_cast<int>(entityIndex);
                         }
                     }

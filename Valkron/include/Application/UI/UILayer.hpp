@@ -58,6 +58,8 @@ namespace Valkron {
             void drawTerminalPanel();
             void setSelectedEntity(int entityIndex);
             void clearEntitySelection();
+            bool deleteEntityByIndex(std::size_t entityIndex);
+            bool deleteSelectedEntity();
             void syncActiveSceneToLibrary();
             bool switchToSceneByIndex(std::size_t sceneIndex);
             void initializeSceneCameraController();

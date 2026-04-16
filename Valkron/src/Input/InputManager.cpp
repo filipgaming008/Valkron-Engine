@@ -147,7 +147,7 @@ namespace Valkron {
             LOG_ERROR("GLFW cursor pos callback: InputManager pointer is null");
             return;
         }
-        LOG_DEBUG("GLFW cursor pos callback: x=" + std::to_string(xpos) + ", y=" + std::to_string(ypos));
+        // LOG_DEBUG("GLFW cursor pos callback: x=" + std::to_string(xpos) + ", y=" + std::to_string(ypos));
         manager->m_mousePosition = glm::vec2(xpos, ypos);
 
         MouseMoveEvent event(xpos, ypos);
@@ -160,7 +160,7 @@ namespace Valkron {
             LOG_ERROR("GLFW scroll callback: InputManager pointer is null");
             return;
         }
-        LOG_DEBUG("GLFW scroll callback: xoffset=" + std::to_string(xoffset) + ", yoffset=" + std::to_string(yoffset));
+        // LOG_DEBUG("GLFW scroll callback: xoffset=" + std::to_string(xoffset) + ", yoffset=" + std::to_string(yoffset));
         manager->m_scrollDelta = static_cast<float>(yoffset);
 
         MouseScrollEvent event(xoffset, yoffset);

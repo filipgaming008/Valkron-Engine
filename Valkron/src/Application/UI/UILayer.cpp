@@ -11,9 +11,13 @@
 #include "Renderer/Texture.hpp"
 #include "Window/Window.hpp"
 
+#define GLFW_INCLUDE_NONE
+#include "GLFW/glfw3.h"
+
 #include "imgui.h"
 #include "imgui_internal.h"
 #include "ImGuizmo.h"
+#include "ImGuiFileDialog.h"
 
 #include "glm/glm.hpp"
 #include "glm/geometric.hpp"
@@ -40,6 +44,96 @@
 #include <unordered_set>
 
 namespace Valkron {
+
+    constexpr const char* kRuntimeAssetImportDialogKey = "RuntimeAssetImportDialog";
+
+    struct EditorKeybindOption {
+        int keyCode = -1;
+        const char* label = "Unknown";
+    };
+
+    const std::array<EditorKeybindOption, 20>& getEditorKeybindOptions() {
+        static const std::array<EditorKeybindOption, 20> options = {{
+            {GLFW_KEY_ESCAPE, "Escape"},
+            {GLFW_KEY_DELETE, "Delete"},
+            {GLFW_KEY_BACKSPACE, "Backspace"},
+            {GLFW_KEY_ENTER, "Enter"},
+            {GLFW_KEY_SPACE, "Space"},
+            {GLFW_KEY_Q, "Q"},
+            {GLFW_KEY_W, "W"},
+            {GLFW_KEY_E, "E"},
+            {GLFW_KEY_R, "R"},
+            {GLFW_KEY_X, "X"},
+            {GLFW_KEY_C, "C"},
+            {GLFW_KEY_V, "V"},
+            {GLFW_KEY_1, "1"},
+            {GLFW_KEY_2, "2"},
+            {GLFW_KEY_3, "3"},
+            {GLFW_KEY_4, "4"},
+            {GLFW_KEY_F1, "F1"},
+            {GLFW_KEY_F2, "F2"},
+            {GLFW_KEY_F3, "F3"},
+            {GLFW_KEY_F4, "F4"}
+        }};
+        return options;
+    }
+
+    bool isSupportedEditorKeybind(int keyCode) {
+        const auto& options = getEditorKeybindOptions();
+        return std::any_of(options.begin(), options.end(), [keyCode](const EditorKeybindOption& option) {
+            return option.keyCode == keyCode;
+        });
+    }
+
+    int sanitizeEditorKeybind(int keyCode, int fallbackKeyCode) {
+        return isSupportedEditorKeybind(keyCode) ? keyCode : fallbackKeyCode;
+    }
+
+    const char* getEditorKeybindLabel(int keyCode) {
+        const auto& options = getEditorKeybindOptions();
+        const auto it = std::find_if(options.begin(), options.end(), [keyCode](const EditorKeybindOption& option) {
+            return option.keyCode == keyCode;
+        });
+
+        if (it == options.end()) {
+            return "Unassigned";
+        }
+
+        return it->label;
+    }
+
+    void applyRuntimeImportDialogStyles() {
+        const ImVec4 baseFolderColor = ImGui::GetStyleColorVec4(ImGuiCol_HeaderActive);
+        const ImVec4 folderColor(
+            std::min(baseFolderColor.x + 0.22f, 1.0f),
+            std::min(baseFolderColor.y + 0.18f, 1.0f),
+            std::min(baseFolderColor.z + 0.18f, 1.0f),
+            1.0f
+        );
+        ImGuiFileDialog::Instance()->SetFileStyle(
+            IGFD_FileStyleByTypeDir,
+            "",
+            folderColor,
+            "[DIR]"
+        );
+    }
+
+    const char* getRuntimeImportFilterString(RuntimeImportMode mode) {
+        switch (mode) {
+            case RuntimeImportMode::Texture2D:
+            case RuntimeImportMode::Texture3D:
+                return ".*,.png,.jpg,.jpeg,.bmp,.tga,.ppm";
+            case RuntimeImportMode::Shader:
+                return ".*,.vert,.vs,.frag,.fs,.glsl";
+            case RuntimeImportMode::Compute:
+                return ".*,.comp,.glsl";
+            case RuntimeImportMode::Model:
+                return ".*,.obj,.fbx,.gltf,.glb,.dae,.3ds";
+            case RuntimeImportMode::Auto:
+            default:
+                return ".*,.png,.jpg,.jpeg,.bmp,.tga,.ppm,.vert,.vs,.frag,.fs,.comp,.glsl,.hlsl,.wgsl,.obj,.fbx,.gltf,.glb,.dae,.3ds";
+        }
+    }
 
     const char* sceneStateToString(SceneState state) {
         switch (state) {
@@ -322,10 +416,15 @@ namespace Valkron {
     }
 
     glm::mat4 composeLocalTransformMatrix(const SceneTransform& transform) {
+        const auto stabilizeSignedScale = [](float value) {
+            const float sign = value < 0.0f ? -1.0f : 1.0f;
+            return sign * std::max(0.01f, std::abs(value));
+        };
+
         const glm::vec3 combinedScale(
-            std::max(0.01f, transform.scale.x * transform.size.x),
-            std::max(0.01f, transform.scale.y * transform.size.y),
-            std::max(0.01f, transform.scale.z * transform.size.z)
+            stabilizeSignedScale(transform.scale.x * transform.size.x),
+            stabilizeSignedScale(transform.scale.y * transform.size.y),
+            stabilizeSignedScale(transform.scale.z * transform.size.z)
         );
 
         glm::mat4 matrix(1.0f);
@@ -908,6 +1007,67 @@ namespace Valkron {
         m_activeScene.setGameStateValue("SelectedEntity", "None");
     }
 
+    bool UILayer::deleteEntityByIndex(std::size_t entityIndex) {
+        const auto& currentEntities = m_activeScene.getEntityData();
+        if (entityIndex >= currentEntities.size()) {
+            return false;
+        }
+
+        const std::string removedEntityName = currentEntities[entityIndex].name;
+        const bool removed = m_activeScene.removeEntity(removedEntityName);
+        if (!removed) {
+            return false;
+        }
+
+        appendTerminalLine("Removed " + removedEntityName + ".");
+
+        const std::string currentPrimaryCameraName = m_activeScene.getGameStateValue("PrimaryCameraEntity").value_or("");
+        if (!currentPrimaryCameraName.empty() && currentPrimaryCameraName == removedEntityName) {
+            std::string fallbackCameraName;
+            const auto& remainingEntities = m_activeScene.getEntityData();
+            for (const SceneEntity& remainingEntity : remainingEntities) {
+                if (remainingEntity.type == SceneEntityType::Camera) {
+                    fallbackCameraName = remainingEntity.name;
+                    break;
+                }
+            }
+
+            m_activeScene.setGameStateValue("PrimaryCameraEntity", fallbackCameraName);
+            if (fallbackCameraName.empty()) {
+                appendTerminalLine("Primary play camera cleared (no camera entities remain).");
+            } else {
+                appendTerminalLine("Primary play camera switched to " + fallbackCameraName + ".");
+            }
+        }
+
+        if (m_selectedEntityIndex == static_cast<int>(entityIndex)) {
+            clearEntitySelection();
+            return true;
+        }
+
+        if (m_selectedEntityIndex > static_cast<int>(entityIndex)) {
+            --m_selectedEntityIndex;
+        }
+
+        const auto& updatedEntities = m_activeScene.getEntityData();
+        if (m_selectedEntityIndex >= 0 && m_selectedEntityIndex < static_cast<int>(updatedEntities.size())) {
+            setSelectedEntity(m_selectedEntityIndex);
+        } else {
+            clearEntitySelection();
+        }
+
+        return true;
+    }
+
+    bool UILayer::deleteSelectedEntity() {
+        const auto& entities = m_activeScene.getEntityData();
+        if (m_selectedEntityIndex < 0 || m_selectedEntityIndex >= static_cast<int>(entities.size())) {
+            return false;
+        }
+
+        return deleteEntityByIndex(static_cast<std::size_t>(m_selectedEntityIndex));
+    }
+
     void UILayer::syncActiveSceneToLibrary() {
         if (m_activeSceneLibraryIndex < 0) {
             return;
@@ -950,8 +1110,28 @@ namespace Valkron {
             m_assetImportCurrentDirectory = std::filesystem::current_path(ec);
         }
 
+        if (ImGuiFileDialog::Instance()->IsOpened(kRuntimeAssetImportDialogKey)) {
+            ImGuiFileDialog::Instance()->Close();
+        }
+
+        IGFD::FileDialogConfig dialogConfig;
+        dialogConfig.path = m_assetImportCurrentDirectory.string();
+        dialogConfig.countSelectionMax = 1;
+        dialogConfig.flags = ImGuiFileDialogFlags_Modal |
+            ImGuiFileDialogFlags_DontShowHiddenFiles |
+            ImGuiFileDialogFlags_CaseInsensitiveExtentionFiltering;
+
+        applyRuntimeImportDialogStyles();
+
+        ImGuiFileDialog::Instance()->OpenDialog(
+            kRuntimeAssetImportDialogKey,
+            m_assetImportDialogTitle.c_str(),
+            getRuntimeImportFilterString(m_assetImportMode),
+            dialogConfig
+        );
+
         m_assetImportBrowserOpen = true;
-        m_assetImportBrowserRequestOpen = true;
+        m_assetImportBrowserRequestOpen = false;
     }
 
     bool UILayer::isAssetPathAllowedForMode(const std::filesystem::path& path, RuntimeImportMode mode) const {
@@ -963,104 +1143,26 @@ namespace Valkron {
             return;
         }
 
-        VALKRON_CORE_ASSERT(!m_assetImportDialogTitle.empty(), "Asset import dialog title must not be empty");
+        if (ImGuiFileDialog::Instance()->Display(kRuntimeAssetImportDialogKey, ImGuiWindowFlags_NoCollapse, ImVec2(760.0f, 460.0f))) {
+            if (ImGuiFileDialog::Instance()->IsOk()) {
+                const std::string selectedPath = ImGuiFileDialog::Instance()->GetFilePathName(IGFD_ResultMode_KeepInputFile);
+                m_assetImportSelectedPath = selectedPath;
+                m_assetImportCurrentDirectory = ImGuiFileDialog::Instance()->GetCurrentPath();
 
-        if (m_assetImportBrowserRequestOpen) {
-            ImGui::OpenPopup(m_assetImportDialogTitle.c_str());
+                if (isAssetPathAllowedForMode(m_assetImportSelectedPath, m_assetImportMode)) {
+                    const bool imported = importRuntimeAssetFromPath(selectedPath, m_assetImportMode);
+                    if (imported) {
+                        AssetManager::saveSceneAssetCache(m_activeScene);
+                    }
+                } else {
+                    appendTerminalLine("Import cancelled: selected file type is not allowed for this mode.");
+                }
+            }
+
+            ImGuiFileDialog::Instance()->Close();
+            m_assetImportBrowserOpen = false;
             m_assetImportBrowserRequestOpen = false;
         }
-
-        bool keepOpen = m_assetImportBrowserOpen;
-        ImGui::SetNextWindowSize(ImVec2(760.0f, 460.0f), ImGuiCond_FirstUseEver);
-        if (!ImGui::BeginPopupModal(m_assetImportDialogTitle.c_str(), &keepOpen, ImGuiWindowFlags_NoCollapse)) {
-            m_assetImportBrowserOpen = keepOpen;
-            return;
-        }
-
-        std::error_code ec;
-        if (m_assetImportCurrentDirectory.empty()) {
-            m_assetImportCurrentDirectory = std::filesystem::current_path(ec);
-        }
-
-        ImGui::Text("Current Directory");
-        ImGui::TextWrapped("%s", m_assetImportCurrentDirectory.string().c_str());
-
-        if (ImGui::Button("Up")) {
-            const std::filesystem::path parent = m_assetImportCurrentDirectory.parent_path();
-            if (!parent.empty()) {
-                m_assetImportCurrentDirectory = parent;
-                m_assetImportSelectedPath.clear();
-            }
-        }
-        ImGui::SameLine();
-        if (ImGui::Button("Assets Root")) {
-            const std::filesystem::path assetRoot = FileSystem::getAssetRootDirectory();
-            if (!assetRoot.empty() && std::filesystem::exists(assetRoot, ec)) {
-                m_assetImportCurrentDirectory = assetRoot;
-                m_assetImportSelectedPath.clear();
-            }
-        }
-
-        std::vector<std::filesystem::path> directories;
-        std::vector<std::filesystem::path> files;
-        if (std::filesystem::exists(m_assetImportCurrentDirectory, ec)) {
-            for (const std::filesystem::directory_entry& entry : std::filesystem::directory_iterator(m_assetImportCurrentDirectory, ec)) {
-                if (entry.is_directory(ec)) {
-                    directories.push_back(entry.path());
-                } else if (entry.is_regular_file(ec) && isAssetPathAllowedForMode(entry.path(), m_assetImportMode)) {
-                    files.push_back(entry.path());
-                }
-            }
-        }
-
-        std::sort(directories.begin(), directories.end());
-        std::sort(files.begin(), files.end());
-
-        if (ImGui::BeginChild("AssetImportBrowserEntries", ImVec2(0.0f, -56.0f), true)) {
-            for (const std::filesystem::path& dirPath : directories) {
-                const std::string label = "[DIR] " + dirPath.filename().string();
-                if (ImGui::Selectable(label.c_str(), false)) {
-                    m_assetImportCurrentDirectory = dirPath;
-                    m_assetImportSelectedPath.clear();
-                }
-            }
-
-            for (const std::filesystem::path& filePath : files) {
-                const bool selected = filePath == m_assetImportSelectedPath;
-                if (ImGui::Selectable(filePath.filename().string().c_str(), selected)) {
-                    m_assetImportSelectedPath = filePath;
-                }
-            }
-        }
-        ImGui::EndChild();
-
-        ImGui::TextWrapped("Selected: %s", m_assetImportSelectedPath.empty() ? "None" : m_assetImportSelectedPath.string().c_str());
-
-        const bool hasSelection = !m_assetImportSelectedPath.empty();
-        if (!hasSelection) {
-            ImGui::BeginDisabled();
-        }
-        if (ImGui::Button("Import", ImVec2(120.0f, 0.0f))) {
-            const bool imported = importRuntimeAssetFromPath(m_assetImportSelectedPath.string(), m_assetImportMode);
-            if (imported) {
-                AssetManager::saveSceneAssetCache(m_activeScene);
-                m_assetImportBrowserOpen = false;
-                ImGui::CloseCurrentPopup();
-            }
-        }
-        if (!hasSelection) {
-            ImGui::EndDisabled();
-        }
-
-        ImGui::SameLine();
-        if (ImGui::Button("Cancel", ImVec2(120.0f, 0.0f))) {
-            m_assetImportBrowserOpen = false;
-            ImGui::CloseCurrentPopup();
-        }
-
-        ImGui::EndPopup();
-
-        m_assetImportBrowserOpen = keepOpen && m_assetImportBrowserOpen;
     }
 
     bool UILayer::importRuntimeAssetFromPath(const std::string& assetPath, RuntimeImportMode mode) {
@@ -1105,6 +1207,10 @@ namespace Valkron {
                     subjectEntity->transform.scale = subjectScale;
                     subjectEntity->transform.size = glm::vec3(1.0f, 1.0f, 1.0f);
                     subjectEntity->modelAssetName = "test_cube.obj";
+                    subjectEntity->modelMeshIndices.clear();
+                    subjectEntity->applyModelNodeTransforms = true;
+                    subjectEntity->shaderComponent.enabled = true;
+                    subjectEntity->shaderComponent.shaderName = "PBR";
                 }
             }
 
@@ -1113,6 +1219,8 @@ namespace Valkron {
             scene.addAsset("textured.frag", "assets/shaders/textured.frag");
             scene.addAsset("blinn_phong.vert", "assets/shaders/blinn_phong.vert");
             scene.addAsset("blinn_phong.frag", "assets/shaders/blinn_phong.frag");
+            scene.addAsset("pbr.vert", "assets/shaders/pbr.vert");
+            scene.addAsset("pbr.frag", "assets/shaders/pbr.frag");
             scene.addAsset("default_compute.comp", "assets/shaders/default_compute.comp");
             scene.addAsset("test_cube.obj", "assets/models/test_cube.obj");
 
@@ -1164,11 +1272,22 @@ namespace Valkron {
             [](const SceneAsset& asset) { return asset.name == "blinn_phong.vert"; }
         );
 
+        const bool hasPbrShaderAsset = std::any_of(
+            m_activeScene.getAssets().begin(),
+            m_activeScene.getAssets().end(),
+            [](const SceneAsset& asset) { return asset.name == "pbr.vert"; }
+        );
+
         if (!hasBlinnShaderAsset) {
             m_activeScene.addAsset("blinn_phong.vert", "assets/shaders/blinn_phong.vert");
             m_activeScene.addAsset("blinn_phong.frag", "assets/shaders/blinn_phong.frag");
             m_activeScene.addAsset("default_compute.comp", "assets/shaders/default_compute.comp");
             m_activeScene.addAsset("test_cube.obj", "assets/models/test_cube.obj");
+        }
+
+        if (!hasPbrShaderAsset) {
+            m_activeScene.addAsset("pbr.vert", "assets/shaders/pbr.vert");
+            m_activeScene.addAsset("pbr.frag", "assets/shaders/pbr.frag");
         }
 
         m_terminalLines.clear();
@@ -1291,7 +1410,7 @@ namespace Valkron {
         }
 
         std::optional<glm::mat4> runtimeCameraTransform;
-        std::optional<glm::vec3> directionalLightDirection;
+        std::optional<SceneLightState> activeSceneLight;
         for (std::size_t entityIndex = 0; entityIndex < entities.size(); ++entityIndex) {
             const glm::mat4 worldTransform = composeEntityWorldTransformMatrix(entities, entityIndex);
             const bool cameraEntity = isCameraEntity(entities[entityIndex]);
@@ -1301,15 +1420,27 @@ namespace Valkron {
                 const glm::vec3 lightPosition = extractWorldPosition(worldTransform);
                 lightEntityPositions.push_back(lightPosition);
 
-                if (!directionalLightDirection.has_value()) {
+                if (!activeSceneLight.has_value()) {
+                    const SceneEntity& lightEntityData = entities[entityIndex];
                     glm::vec3 candidateDirection = extractForwardDirection(worldTransform);
-                    const SceneTransform& lightTransform = entities[entityIndex].transform;
+                    const SceneTransform& lightTransform = lightEntityData.transform;
                     const bool hasExplicitRotation = glm::length(lightTransform.rotation) > 0.001f;
                     if (!hasExplicitRotation && glm::length(lightPosition) > 0.001f) {
                         candidateDirection = glm::normalize(-lightPosition);
                     }
 
-                    directionalLightDirection = candidateDirection;
+                    SceneLightState lightState{};
+                    lightState.type = lightEntityData.lightComponent.type == SceneLightType::Point
+                        ? RenderLightType::Point
+                        : RenderLightType::Directional;
+                    lightState.enabled = true;
+                    lightState.direction = candidateDirection;
+                    lightState.position = lightPosition;
+                    lightState.color = lightEntityData.lightComponent.color;
+                    lightState.intensity = lightEntityData.lightComponent.intensity;
+                    lightState.ambientStrength = lightEntityData.lightComponent.ambientStrength;
+                    lightState.range = lightEntityData.lightComponent.range;
+                    activeSceneLight = lightState;
                 }
             }
 
@@ -1318,21 +1449,44 @@ namespace Valkron {
             }
 
             if (!cameraEntity && !lightEntity && !entities[entityIndex].modelAssetName.empty()) {
-                sceneModelInstances.push_back(SceneModelInstance{
-                    entities[entityIndex].modelAssetName,
-                    worldTransform,
-                    static_cast<int>(entityIndex) == m_selectedEntityIndex
-                });
+                const SceneEntity& entity = entities[entityIndex];
+                SceneModelInstance instance{};
+                instance.modelName = entity.modelAssetName;
+                instance.modelMeshIndices = entity.modelMeshIndices;
+                instance.applyModelNodeTransforms = entity.applyModelNodeTransforms;
+                instance.transform = worldTransform;
+                instance.selected = static_cast<int>(entityIndex) == m_selectedEntityIndex;
+                instance.hasShaderComponent = entity.shaderComponent.enabled;
+                instance.shaderName = entity.shaderComponent.shaderName;
+                instance.pbrAlbedoColor = entity.shaderComponent.pbrMaterial.albedoColor;
+                instance.pbrMetallic = entity.shaderComponent.pbrMaterial.metallic;
+                instance.pbrRoughness = entity.shaderComponent.pbrMaterial.roughness;
+                instance.pbrAmbientOcclusion = entity.shaderComponent.pbrMaterial.ambientOcclusion;
+                instance.pbrDiffuseTexture = entity.shaderComponent.pbrMaterial.diffuseTextureAsset;
+                instance.pbrAlbedoTexture = entity.shaderComponent.pbrMaterial.albedoTextureAsset;
+                instance.pbrAlphaTexture = entity.shaderComponent.pbrMaterial.alphaTextureAsset;
+                instance.pbrNormalTexture = entity.shaderComponent.pbrMaterial.normalTextureAsset;
+                instance.pbrMetallicTexture = entity.shaderComponent.pbrMaterial.metallicTextureAsset;
+                instance.pbrRoughnessTexture = entity.shaderComponent.pbrMaterial.roughnessTextureAsset;
+                instance.pbrAOTexture = entity.shaderComponent.pbrMaterial.aoTextureAsset;
+                sceneModelInstances.push_back(std::move(instance));
             }
         }
 
         Renderer::setSceneModelInstances(sceneModelInstances);
         Renderer::setLightEntityPositions(lightEntityPositions);
 
-        if (directionalLightDirection.has_value()) {
-            Renderer::setDirectionalLight(directionalLightDirection.value(), glm::vec3(1.0f, 0.98f, 0.95f), 1.15f, 0.24f);
+        if (activeSceneLight.has_value()) {
+            Renderer::setSceneLight(activeSceneLight.value());
         } else {
-            Renderer::setDirectionalLight(glm::vec3(-0.40f, -1.00f, -0.30f), glm::vec3(1.0f, 0.98f, 0.95f), 1.05f, 0.22f);
+            SceneLightState fallbackLight{};
+            fallbackLight.type = RenderLightType::Directional;
+            fallbackLight.direction = glm::vec3(-0.40f, -1.00f, -0.30f);
+            fallbackLight.color = glm::vec3(1.0f, 0.98f, 0.95f);
+            fallbackLight.intensity = 1.05f;
+            fallbackLight.ambientStrength = 0.22f;
+            fallbackLight.enabled = true;
+            Renderer::setSceneLight(fallbackLight);
         }
 
         m_runtimeEntityCameraActive = false;
@@ -1394,6 +1548,30 @@ namespace Valkron {
 
     void UILayer::onEvent(Event& event) {
         ImGuiIO& io = ImGui::GetIO();
+
+        if (event.type == EventType::Key) {
+            KeyEvent& keyEvent = static_cast<KeyEvent&>(event);
+            const bool keyPressed = keyEvent.action == GLFW_PRESS;
+            const bool allowEditorKeybinds = !io.WantTextInput && !io.KeyCtrl && !io.KeyAlt && !io.KeySuper;
+            if (keyPressed && allowEditorKeybinds) {
+                if (keyEvent.key == m_editableEngineSettings.deselectKey) {
+                    const auto& entities = m_activeScene.getEntityData();
+                    if (m_selectedEntityIndex >= 0 && m_selectedEntityIndex < static_cast<int>(entities.size())) {
+                        clearEntitySelection();
+                        event.handled = true;
+                        return;
+                    }
+                }
+
+                if (keyEvent.key == m_editableEngineSettings.deleteEntityKey) {
+                    if (deleteSelectedEntity()) {
+                        event.handled = true;
+                        return;
+                    }
+                }
+            }
+        }
+
         if (io.WantCaptureMouse && (
             event.type == EventType::MouseButton ||
             event.type == EventType::MouseMove ||
@@ -1533,6 +1711,9 @@ namespace Valkron {
         ImGui::Text("Primary Monitor: %d x %d", monitorWidth, monitorHeight);
 
         bool changed = false;
+        m_editableEngineSettings.deselectKey = sanitizeEditorKeybind(m_editableEngineSettings.deselectKey, GLFW_KEY_ESCAPE);
+        m_editableEngineSettings.deleteEntityKey = sanitizeEditorKeybind(m_editableEngineSettings.deleteEntityKey, GLFW_KEY_DELETE);
+
         if (ImGui::Checkbox("Auto Detect Monitor Size", &m_editableEngineSettings.autoDetectMonitorSize)) {
             changed = true;
         }
@@ -1571,9 +1752,36 @@ namespace Valkron {
             changed = true;
         }
 
+        ImGui::Spacing();
+        ImGui::Text("Editor Keybinds");
+
+        const auto drawKeybindCombo = [&changed](const char* label, int& keyCode) {
+            const char* preview = getEditorKeybindLabel(keyCode);
+            if (ImGui::BeginCombo(label, preview)) {
+                for (const EditorKeybindOption& option : getEditorKeybindOptions()) {
+                    const bool selected = keyCode == option.keyCode;
+                    if (ImGui::Selectable(option.label, selected)) {
+                        keyCode = option.keyCode;
+                        changed = true;
+                    }
+
+                    if (selected) {
+                        ImGui::SetItemDefaultFocus();
+                    }
+                }
+
+                ImGui::EndCombo();
+            }
+        };
+
+        drawKeybindCombo("Deselect Entity", m_editableEngineSettings.deselectKey);
+        drawKeybindCombo("Delete Selected Entity", m_editableEngineSettings.deleteEntityKey);
+
         if (changed) {
             m_editableEngineSettings.windowWidth = std::max(64, m_editableEngineSettings.windowWidth);
             m_editableEngineSettings.windowHeight = std::max(64, m_editableEngineSettings.windowHeight);
+            m_editableEngineSettings.deselectKey = sanitizeEditorKeybind(m_editableEngineSettings.deselectKey, GLFW_KEY_ESCAPE);
+            m_editableEngineSettings.deleteEntityKey = sanitizeEditorKeybind(m_editableEngineSettings.deleteEntityKey, GLFW_KEY_DELETE);
             if (m_editableEngineSettings.windowTitle.empty()) {
                 m_editableEngineSettings.windowTitle = "Valkron Engine";
                 std::snprintf(m_windowTitleBuffer.data(), m_windowTitleBuffer.size(), "%s", m_editableEngineSettings.windowTitle.c_str());
@@ -1674,6 +1882,8 @@ namespace Valkron {
         }
 
         m_editableEngineSettings = m_engineConfig->getSettings();
+        m_editableEngineSettings.deselectKey = sanitizeEditorKeybind(m_editableEngineSettings.deselectKey, GLFW_KEY_ESCAPE);
+        m_editableEngineSettings.deleteEntityKey = sanitizeEditorKeybind(m_editableEngineSettings.deleteEntityKey, GLFW_KEY_DELETE);
         std::fill(m_windowTitleBuffer.begin(), m_windowTitleBuffer.end(), '\0');
         std::snprintf(m_windowTitleBuffer.data(), m_windowTitleBuffer.size(), "%s", m_editableEngineSettings.windowTitle.c_str());
         m_engineSettingsDirty = false;

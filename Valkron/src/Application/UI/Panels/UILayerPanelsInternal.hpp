@@ -50,6 +50,7 @@ namespace Valkron {
     const char* getEntityIconToken(const SceneEntity& entity);
     ImVec4 getEntityBadgeColor(const SceneEntity& entity);
     ImVec4 brightenColor(const ImVec4& color, float amount);
+    void ensureEntityUsesPbrComponent(SceneEntity& entity);
     glm::mat4 composeEntityWorldTransformMatrix(const std::vector<SceneEntity>& entities, std::size_t entityIndex);
     glm::vec3 extractWorldPosition(const glm::mat4& worldMatrix);
     std::optional<ImVec2> projectWorldPositionToImage(

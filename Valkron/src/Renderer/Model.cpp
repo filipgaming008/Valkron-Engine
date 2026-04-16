@@ -10,7 +10,10 @@
 
 #include "glad/gl.h"
 
+#include "glm/gtc/type_ptr.hpp"
+
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <filesystem>
 #include <fstream>
@@ -49,6 +52,118 @@ namespace Valkron {
 
     std::string normalizePathKey(const std::filesystem::path& path) {
         return toLowercaseCopy(path.lexically_normal().generic_string());
+    }
+
+    glm::mat4 convertAssimpMatrixToGlm(const aiMatrix4x4& matrix) {
+        glm::mat4 converted(1.0f);
+        converted[0][0] = matrix.a1;
+        converted[1][0] = matrix.a2;
+        converted[2][0] = matrix.a3;
+        converted[3][0] = matrix.a4;
+        converted[0][1] = matrix.b1;
+        converted[1][1] = matrix.b2;
+        converted[2][1] = matrix.b3;
+        converted[3][1] = matrix.b4;
+        converted[0][2] = matrix.c1;
+        converted[1][2] = matrix.c2;
+        converted[2][2] = matrix.c3;
+        converted[3][2] = matrix.c4;
+        converted[0][3] = matrix.d1;
+        converted[1][3] = matrix.d2;
+        converted[2][3] = matrix.d3;
+        converted[3][3] = matrix.d4;
+        return converted;
+    }
+
+    void transformBoundsByMatrix(
+        const glm::vec3& boundsMin,
+        const glm::vec3& boundsMax,
+        const glm::mat4& transform,
+        glm::vec3& outBoundsMin,
+        glm::vec3& outBoundsMax
+    ) {
+        const std::array<glm::vec3, 8> corners = {
+            glm::vec3(boundsMin.x, boundsMin.y, boundsMin.z),
+            glm::vec3(boundsMin.x, boundsMin.y, boundsMax.z),
+            glm::vec3(boundsMin.x, boundsMax.y, boundsMin.z),
+            glm::vec3(boundsMin.x, boundsMax.y, boundsMax.z),
+            glm::vec3(boundsMax.x, boundsMin.y, boundsMin.z),
+            glm::vec3(boundsMax.x, boundsMin.y, boundsMax.z),
+            glm::vec3(boundsMax.x, boundsMax.y, boundsMin.z),
+            glm::vec3(boundsMax.x, boundsMax.y, boundsMax.z)
+        };
+
+        outBoundsMin = glm::vec3(
+            std::numeric_limits<float>::max(),
+            std::numeric_limits<float>::max(),
+            std::numeric_limits<float>::max()
+        );
+        outBoundsMax = glm::vec3(
+            std::numeric_limits<float>::lowest(),
+            std::numeric_limits<float>::lowest(),
+            std::numeric_limits<float>::lowest()
+        );
+
+        for (const glm::vec3& corner : corners) {
+            const glm::vec3 transformedCorner = glm::vec3(transform * glm::vec4(corner, 1.0f));
+            outBoundsMin.x = std::min(outBoundsMin.x, transformedCorner.x);
+            outBoundsMin.y = std::min(outBoundsMin.y, transformedCorner.y);
+            outBoundsMin.z = std::min(outBoundsMin.z, transformedCorner.z);
+            outBoundsMax.x = std::max(outBoundsMax.x, transformedCorner.x);
+            outBoundsMax.y = std::max(outBoundsMax.y, transformedCorner.y);
+            outBoundsMax.z = std::max(outBoundsMax.z, transformedCorner.z);
+        }
+    }
+
+    struct UVTransform2D {
+        glm::vec2 translation{0.0f, 0.0f};
+        glm::vec2 scaling{1.0f, 1.0f};
+        float rotationRadians = 0.0f;
+        bool enabled = false;
+    };
+
+    UVTransform2D getUvTransformForMesh(const aiMesh* mesh, const aiScene* scene) {
+        UVTransform2D transform;
+        if (mesh == nullptr || scene == nullptr || !scene->HasMaterials()) {
+            return transform;
+        }
+
+        aiMaterial* material = scene->mMaterials[mesh->mMaterialIndex];
+        if (material == nullptr) {
+            return transform;
+        }
+
+        aiUVTransform assimpTransform;
+        bool hasUvTransform = material->Get(AI_MATKEY_UVTRANSFORM(aiTextureType_BASE_COLOR, 0), assimpTransform) == AI_SUCCESS;
+        if (!hasUvTransform) {
+            hasUvTransform = material->Get(AI_MATKEY_UVTRANSFORM(aiTextureType_DIFFUSE, 0), assimpTransform) == AI_SUCCESS;
+        }
+
+        if (!hasUvTransform) {
+            return transform;
+        }
+
+        transform.translation = glm::vec2(assimpTransform.mTranslation.x, assimpTransform.mTranslation.y);
+        transform.scaling = glm::vec2(assimpTransform.mScaling.x, assimpTransform.mScaling.y);
+        transform.rotationRadians = assimpTransform.mRotation;
+        transform.enabled = true;
+        return transform;
+    }
+
+    glm::vec2 applyUvTransform(const glm::vec2& uv, const UVTransform2D& transform) {
+        if (!transform.enabled) {
+            return uv;
+        }
+
+        glm::vec2 transformedUv = uv * transform.scaling;
+        const float cosine = std::cos(transform.rotationRadians);
+        const float sine = std::sin(transform.rotationRadians);
+        transformedUv = glm::vec2(
+            transformedUv.x * cosine - transformedUv.y * sine,
+            transformedUv.x * sine + transformedUv.y * cosine
+        );
+
+        return transformedUv + transform.translation;
     }
 
     std::filesystem::path resolveMaterialTexturePath(const aiString& texturePath, const std::filesystem::path& modelDirectory) {
@@ -105,13 +220,43 @@ namespace Valkron {
         }
 
         auto texture = std::make_shared<Texture>();
-        if (!texture->loadTexture(resolvedPath.string())) {
+        if (!texture->loadTexture(resolvedPath.string(), false)) {
             LOG_WARN("Failed to load material texture: " + resolvedPath.string());
             return nullptr;
         }
 
         outResolvedPath = resolvedPath.string();
         return texture;
+    }
+
+    void collectMaterialTexturePaths(
+        aiMaterial* material,
+        aiTextureType textureType,
+        const std::filesystem::path& modelDirectory,
+        std::vector<std::string>& outResolvedPaths
+    ) {
+        if (material == nullptr) {
+            return;
+        }
+
+        const unsigned int textureCount = material->GetTextureCount(textureType);
+        if (textureCount == 0) {
+            return;
+        }
+
+        for (unsigned int textureIndex = 0; textureIndex < textureCount; ++textureIndex) {
+            aiString texturePath;
+            if (material->GetTexture(textureType, textureIndex, &texturePath) != AI_SUCCESS) {
+                continue;
+            }
+
+            const std::filesystem::path resolvedPath = resolveMaterialTexturePath(texturePath, modelDirectory);
+            if (resolvedPath.empty()) {
+                continue;
+            }
+
+            outResolvedPaths.push_back(resolvedPath.string());
+        }
     }
 
     void verifyObjMaterialLibraries(const std::filesystem::path& modelPath) {
@@ -189,35 +334,84 @@ namespace Valkron {
             material.shininess = shininess;
         }
 
+        float opacity = material.opacity;
+        if (aiMat->Get(AI_MATKEY_OPACITY, opacity) == AI_SUCCESS) {
+            material.opacity = std::clamp(opacity, 0.0f, 1.0f);
+        }
+
         std::string diffuseTexturePath;
         material.diffuseTexture = loadMaterialTexture(aiMat, aiTextureType_DIFFUSE, modelDirectory, diffuseTexturePath);
-        if (!diffuseTexturePath.empty()) {
-            material.sourceTexturePaths.push_back(diffuseTexturePath);
-        }
-
+        material.hasAlphaTexture = material.diffuseTexture != nullptr && material.diffuseTexture->getChannels() == 4;
         std::string specularTexturePath;
         material.specularTexture = loadMaterialTexture(aiMat, aiTextureType_SPECULAR, modelDirectory, specularTexturePath);
-        if (!specularTexturePath.empty()) {
-            material.sourceTexturePaths.push_back(specularTexturePath);
-        }
-
         std::string normalTexturePath;
         material.normalTexture = loadMaterialTexture(aiMat, aiTextureType_NORMALS, modelDirectory, normalTexturePath);
         if (material.normalTexture == nullptr) {
             material.normalTexture = loadMaterialTexture(aiMat, aiTextureType_HEIGHT, modelDirectory, normalTexturePath);
         }
-        if (!normalTexturePath.empty()) {
-            material.sourceTexturePaths.push_back(normalTexturePath);
+
+        std::unordered_set<std::string> seenTexturePathKeys;
+        auto appendTexturePath = [&](const std::string& resolvedPath) {
+            if (resolvedPath.empty()) {
+                return;
+            }
+
+            const std::string normalizedKey = normalizePathKey(std::filesystem::path(resolvedPath));
+            if (!seenTexturePathKeys.insert(normalizedKey).second) {
+                return;
+            }
+
+            material.sourceTexturePaths.push_back(resolvedPath);
+        };
+
+        appendTexturePath(diffuseTexturePath);
+        appendTexturePath(specularTexturePath);
+        appendTexturePath(normalTexturePath);
+
+        // Collect additional material maps so FBX/glTF and other PBR-oriented formats
+        // have their external textures discovered and registered for runtime linking.
+        const std::array<aiTextureType, 12> textureTypesToCollect = {
+            aiTextureType_DIFFUSE,
+            aiTextureType_SPECULAR,
+            aiTextureType_NORMALS,
+            aiTextureType_HEIGHT,
+            aiTextureType_BASE_COLOR,
+            aiTextureType_METALNESS,
+            aiTextureType_DIFFUSE_ROUGHNESS,
+            aiTextureType_AMBIENT_OCCLUSION,
+            aiTextureType_LIGHTMAP,
+            aiTextureType_EMISSIVE,
+            aiTextureType_OPACITY,
+            aiTextureType_UNKNOWN
+        };
+
+        std::vector<std::string> collectedTexturePaths;
+        for (const aiTextureType textureType : textureTypesToCollect) {
+            collectMaterialTexturePaths(aiMat, textureType, modelDirectory, collectedTexturePaths);
+        }
+
+        for (const std::string& resolvedPath : collectedTexturePaths) {
+            appendTexturePath(resolvedPath);
         }
 
         return material;
     }
 
-    Model::Mesh buildMesh(const aiMesh* mesh, const aiScene* scene, const std::filesystem::path& modelDirectory) {
+    Model::Mesh buildMesh(
+        const aiMesh* mesh,
+        const aiScene* scene,
+        const std::filesystem::path& modelDirectory,
+        const glm::mat4& nodeTransform,
+        int sourceMeshIndex
+    ) {
         Model::Mesh builtMesh;
         if (mesh == nullptr) {
             return builtMesh;
         }
+
+        builtMesh.sourceMeshIndex = sourceMeshIndex;
+        builtMesh.nodeTransform = nodeTransform;
+        const UVTransform2D uvTransform = getUvTransformForMesh(mesh, scene);
 
         std::vector<ModelVertex> vertices;
         vertices.reserve(mesh->mNumVertices);
@@ -249,7 +443,8 @@ namespace Valkron {
             }
 
             if (mesh->HasTextureCoords(0)) {
-                vertex.texCoord = glm::vec2(mesh->mTextureCoords[0][i].x, mesh->mTextureCoords[0][i].y);
+                const glm::vec2 baseUv(mesh->mTextureCoords[0][i].x, mesh->mTextureCoords[0][i].y);
+                vertex.texCoord = applyUvTransform(baseUv, uvTransform);
             }
 
             vertices.push_back(vertex);
@@ -279,28 +474,45 @@ namespace Valkron {
         layout.push<float>(2);
         builtMesh.vertexArray->addBuffer(*builtMesh.vertexBuffer, layout);
         builtMesh.material = buildMaterial(mesh, scene, modelDirectory);
-        builtMesh.localBoundsMin = meshBoundsMin;
-        builtMesh.localBoundsMax = meshBoundsMax;
+        builtMesh.rawLocalBoundsMin = meshBoundsMin;
+        builtMesh.rawLocalBoundsMax = meshBoundsMax;
+        builtMesh.hasRawLocalBounds = true;
+        transformBoundsByMatrix(meshBoundsMin, meshBoundsMax, nodeTransform, builtMesh.localBoundsMin, builtMesh.localBoundsMax);
         builtMesh.hasLocalBounds = true;
 
         return builtMesh;
     }
 
-    void processNode(aiNode* node, const aiScene* scene, const std::filesystem::path& modelDirectory, std::vector<Model::Mesh>& outMeshes) {
+    void processNode(
+        aiNode* node,
+        const aiScene* scene,
+        const std::filesystem::path& modelDirectory,
+        const glm::mat4& parentTransform,
+        std::vector<Model::Mesh>& outMeshes
+    ) {
         if (node == nullptr || scene == nullptr) {
             return;
         }
 
+        const glm::mat4 nodeTransform = parentTransform * convertAssimpMatrixToGlm(node->mTransformation);
+
         for (unsigned int i = 0; i < node->mNumMeshes; ++i) {
-            const aiMesh* mesh = scene->mMeshes[node->mMeshes[i]];
-            Model::Mesh builtMesh = buildMesh(mesh, scene, modelDirectory);
+            const unsigned int meshIndex = node->mMeshes[i];
+            const aiMesh* mesh = scene->mMeshes[meshIndex];
+            Model::Mesh builtMesh = buildMesh(
+                mesh,
+                scene,
+                modelDirectory,
+                nodeTransform,
+                static_cast<int>(meshIndex)
+            );
             if (builtMesh.vertexArray != nullptr && builtMesh.vertexBuffer != nullptr && builtMesh.indexBuffer != nullptr) {
                 outMeshes.push_back(std::move(builtMesh));
             }
         }
 
         for (unsigned int i = 0; i < node->mNumChildren; ++i) {
-            processNode(node->mChildren[i], scene, modelDirectory, outMeshes);
+            processNode(node->mChildren[i], scene, modelDirectory, nodeTransform, outMeshes);
         }
     }
 
@@ -324,15 +536,17 @@ namespace Valkron {
             LOG_ERROR("Assimp failed to load model: " + m_modelPath + " | " + importer.GetErrorString());
             m_meshes.clear();
             m_hasLocalBounds = false;
+            m_hasTransparentMaterials = false;
             return false;
         }
 
         std::vector<Mesh> loadedMeshes;
         const std::filesystem::path modelDirectory = resolvedModelPath.has_parent_path() ? resolvedModelPath.parent_path() : std::filesystem::path{};
-        processNode(scene->mRootNode, scene, modelDirectory, loadedMeshes);
+        processNode(scene->mRootNode, scene, modelDirectory, glm::mat4(1.0f), loadedMeshes);
 
         m_meshes = std::move(loadedMeshes);
         m_referencedTexturePaths.clear();
+        m_hasTransparentMaterials = false;
         if (m_meshes.empty()) {
             LOG_ERROR("Model contains no renderable meshes: " + m_modelPath);
             m_hasLocalBounds = false;
@@ -352,6 +566,10 @@ namespace Valkron {
         );
 
         for (const Mesh& mesh : m_meshes) {
+            if (mesh.material.opacity < 0.999f || mesh.material.hasAlphaTexture) {
+                m_hasTransparentMaterials = true;
+            }
+
             if (!mesh.hasLocalBounds) {
                 continue;
             }
@@ -433,13 +651,131 @@ namespace Valkron {
         }
     }
 
+    void Model::draw(
+        const Shader& shader,
+        const glm::mat4& baseTransform,
+        const std::vector<int>& meshIndices,
+        bool applyNodeTransforms
+    ) const {
+        std::unordered_set<int> meshIndexFilter;
+        if (!meshIndices.empty()) {
+            meshIndexFilter.reserve(meshIndices.size());
+            for (const int meshIndex : meshIndices) {
+                if (meshIndex >= 0) {
+                    meshIndexFilter.insert(meshIndex);
+                }
+            }
+        }
+
+        for (const Mesh& mesh : m_meshes) {
+            if (!mesh.vertexArray || !mesh.indexBuffer) {
+                continue;
+            }
+
+            if (!meshIndexFilter.empty() && meshIndexFilter.find(mesh.sourceMeshIndex) == meshIndexFilter.end()) {
+                continue;
+            }
+
+            const glm::mat4 modelMatrix = applyNodeTransforms ? (baseTransform * mesh.nodeTransform) : baseTransform;
+            shader.setMat4("u_Model", glm::value_ptr(modelMatrix));
+
+            const bool hasDiffuseMap = mesh.material.diffuseTexture != nullptr;
+            const bool hasSpecularMap = mesh.material.specularTexture != nullptr;
+            shader.setInt("u_Material.hasDiffuseMap", hasDiffuseMap ? 1 : 0);
+            shader.setInt("u_Material.hasSpecularMap", hasSpecularMap ? 1 : 0);
+            shader.setVec3("u_Material.diffuseColor", &mesh.material.diffuseColor.x);
+            shader.setVec3("u_Material.specularColor", &mesh.material.specularColor.x);
+            shader.setFloat("u_Material.shininess", mesh.material.shininess);
+
+            if (hasDiffuseMap) {
+                mesh.material.diffuseTexture->bind(0);
+                shader.setInt("u_Material.diffuseMap", 0);
+            }
+
+            if (hasSpecularMap) {
+                mesh.material.specularTexture->bind(1);
+                shader.setInt("u_Material.specularMap", 1);
+            }
+
+            mesh.vertexArray->bind();
+            mesh.indexBuffer->bind();
+            glDrawElements(GL_TRIANGLES, static_cast<GLsizei>(mesh.indexBuffer->getCount()), GL_UNSIGNED_INT, nullptr);
+
+            if (hasDiffuseMap) {
+                mesh.material.diffuseTexture->unbind();
+            }
+
+            if (hasSpecularMap) {
+                mesh.material.specularTexture->unbind();
+            }
+        }
+    }
+
     bool Model::getLocalBounds(glm::vec3& outMin, glm::vec3& outMax) const {
-        if (!m_hasLocalBounds) {
+        static const std::vector<int> emptyMeshFilter;
+        return getLocalBounds(outMin, outMax, emptyMeshFilter, true);
+    }
+
+    bool Model::getLocalBounds(
+        glm::vec3& outMin,
+        glm::vec3& outMax,
+        const std::vector<int>& meshIndices,
+        bool applyNodeTransforms
+    ) const {
+        if (m_meshes.empty()) {
             return false;
         }
 
-        outMin = m_localBoundsMin;
-        outMax = m_localBoundsMax;
+        std::unordered_set<int> meshIndexFilter;
+        if (!meshIndices.empty()) {
+            meshIndexFilter.reserve(meshIndices.size());
+            for (const int meshIndex : meshIndices) {
+                if (meshIndex >= 0) {
+                    meshIndexFilter.insert(meshIndex);
+                }
+            }
+        }
+
+        bool hasAnyBounds = false;
+        glm::vec3 boundsMin(
+            std::numeric_limits<float>::max(),
+            std::numeric_limits<float>::max(),
+            std::numeric_limits<float>::max()
+        );
+        glm::vec3 boundsMax(
+            std::numeric_limits<float>::lowest(),
+            std::numeric_limits<float>::lowest(),
+            std::numeric_limits<float>::lowest()
+        );
+
+        for (const Mesh& mesh : m_meshes) {
+            if (!meshIndexFilter.empty() && meshIndexFilter.find(mesh.sourceMeshIndex) == meshIndexFilter.end()) {
+                continue;
+            }
+
+            const bool hasMeshBounds = applyNodeTransforms ? mesh.hasLocalBounds : mesh.hasRawLocalBounds;
+            if (!hasMeshBounds) {
+                continue;
+            }
+
+            const glm::vec3& meshBoundsMin = applyNodeTransforms ? mesh.localBoundsMin : mesh.rawLocalBoundsMin;
+            const glm::vec3& meshBoundsMax = applyNodeTransforms ? mesh.localBoundsMax : mesh.rawLocalBoundsMax;
+
+            hasAnyBounds = true;
+            boundsMin.x = std::min(boundsMin.x, meshBoundsMin.x);
+            boundsMin.y = std::min(boundsMin.y, meshBoundsMin.y);
+            boundsMin.z = std::min(boundsMin.z, meshBoundsMin.z);
+            boundsMax.x = std::max(boundsMax.x, meshBoundsMax.x);
+            boundsMax.y = std::max(boundsMax.y, meshBoundsMax.y);
+            boundsMax.z = std::max(boundsMax.z, meshBoundsMax.z);
+        }
+
+        if (!hasAnyBounds) {
+            return false;
+        }
+
+        outMin = boundsMin;
+        outMax = boundsMax;
         return true;
     }
 

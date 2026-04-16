@@ -318,10 +318,14 @@ namespace Valkron {
                     if (const std::optional<std::size_t> entityIndex = m_activeScene.findEntityIndex(entityName); entityIndex.has_value()) {
                         if (SceneEntity* entity = m_activeScene.getEntityByIndex(entityIndex.value()); entity != nullptr) {
                             entity->modelAssetName = selectedAsset.name;
+                            entity->modelMeshIndices.clear();
+                            entity->applyModelNodeTransforms = true;
                             entity->transform.position = m_sceneCameraPivot;
+                            ensureEntityUsesPbrComponent(*entity);
                         }
+
                         setSelectedEntity(static_cast<int>(entityIndex.value()));
-                }
+                    }
 
                     appendTerminalLine("Added model entity " + entityName + " from asset " + selectedAsset.name + ".");
                 } else {
@@ -339,21 +343,61 @@ namespace Valkron {
                 const SceneAsset assetToRemove = currentAssets[pendingRemoveAssetIndex.value()];
 
                 int clearedBindings = 0;
+                int clearedShaderTextureLinks = 0;
                 if (isModelSceneAsset(assetToRemove)) {
                     const auto& entities = m_activeScene.getEntityData();
                     for (std::size_t entityIndex = 0; entityIndex < entities.size(); ++entityIndex) {
                         if (SceneEntity* entity = m_activeScene.getEntityByIndex(entityIndex); entity != nullptr && entity->modelAssetName == assetToRemove.name) {
                             entity->modelAssetName.clear();
+                            entity->modelMeshIndices.clear();
+                            entity->applyModelNodeTransforms = true;
+                            entity->shaderComponent.enabled = false;
                             ++clearedBindings;
                         }
                     }
                 }
 
+                {
+                    const auto& entities = m_activeScene.getEntityData();
+                    for (std::size_t entityIndex = 0; entityIndex < entities.size(); ++entityIndex) {
+                        SceneEntity* entity = m_activeScene.getEntityByIndex(entityIndex);
+                        if (entity == nullptr) {
+                            continue;
+                        }
+
+                        auto clearTextureLink = [&](std::string& linkedTextureName) {
+                            if (linkedTextureName == assetToRemove.name) {
+                                linkedTextureName.clear();
+                                ++clearedShaderTextureLinks;
+                            }
+                        };
+
+                        clearTextureLink(entity->shaderComponent.pbrMaterial.diffuseTextureAsset);
+                        clearTextureLink(entity->shaderComponent.pbrMaterial.albedoTextureAsset);
+                        clearTextureLink(entity->shaderComponent.pbrMaterial.alphaTextureAsset);
+                        clearTextureLink(entity->shaderComponent.pbrMaterial.normalTextureAsset);
+                        clearTextureLink(entity->shaderComponent.pbrMaterial.metallicTextureAsset);
+                        clearTextureLink(entity->shaderComponent.pbrMaterial.roughnessTextureAsset);
+                        clearTextureLink(entity->shaderComponent.pbrMaterial.aoTextureAsset);
+                    }
+                }
+
                 if (m_activeScene.removeAsset(assetToRemove.name)) {
-                    if (clearedBindings > 0) {
+                    if (clearedBindings > 0 || clearedShaderTextureLinks > 0) {
+                        std::string bindingMessage;
+                        if (clearedBindings > 0) {
+                            bindingMessage += "cleared " + std::to_string(clearedBindings) + " model binding(s)";
+                        }
+                        if (clearedShaderTextureLinks > 0) {
+                            if (!bindingMessage.empty()) {
+                                bindingMessage += ", ";
+                            }
+                            bindingMessage += "cleared " + std::to_string(clearedShaderTextureLinks) + " shader texture link(s)";
+                        }
+
                         appendTerminalLine(
                             "Removed scene asset entry: " + assetToRemove.name +
-                            " (cleared " + std::to_string(clearedBindings) + " model binding(s))."
+                            " (" + bindingMessage + ")."
                         );
                     } else {
                         appendTerminalLine("Removed scene asset entry: " + assetToRemove.name + ".");

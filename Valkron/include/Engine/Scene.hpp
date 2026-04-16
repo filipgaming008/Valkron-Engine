@@ -42,11 +42,44 @@ namespace Valkron {
         Light
     };
 
+    enum class SceneLightType {
+        Directional,
+        Point
+    };
+
     struct VALKRON_API SceneTransform {
         glm::vec3 position{0.0f, 0.0f, 0.0f};
         glm::vec3 rotation{0.0f, 0.0f, 0.0f};
         glm::vec3 scale{1.0f, 1.0f, 1.0f};
         glm::vec3 size{1.0f, 1.0f, 1.0f};
+    };
+
+    struct VALKRON_API ScenePBRMaterial {
+        glm::vec3 albedoColor{1.0f, 1.0f, 1.0f};
+        float metallic = 0.0f;
+        float roughness = 0.55f;
+        float ambientOcclusion = 1.0f;
+        std::string diffuseTextureAsset;
+        std::string albedoTextureAsset;
+        std::string alphaTextureAsset;
+        std::string normalTextureAsset;
+        std::string metallicTextureAsset;
+        std::string roughnessTextureAsset;
+        std::string aoTextureAsset;
+    };
+
+    struct VALKRON_API SceneShaderComponent {
+        bool enabled = false;
+        std::string shaderName;
+        ScenePBRMaterial pbrMaterial{};
+    };
+
+    struct VALKRON_API SceneLightComponent {
+        SceneLightType type = SceneLightType::Directional;
+        glm::vec3 color{1.0f, 0.98f, 0.95f};
+        float intensity = 1.15f;
+        float ambientStrength = 0.24f;
+        float range = 12.0f;
     };
 
     struct VALKRON_API SceneEntity {
@@ -55,6 +88,10 @@ namespace Valkron {
         int parentIndex = -1;
         SceneEntityType type = SceneEntityType::Generic;
         std::string modelAssetName;
+        std::vector<int> modelMeshIndices;
+        bool applyModelNodeTransforms = true;
+        SceneShaderComponent shaderComponent{};
+        SceneLightComponent lightComponent{};
     };
 
     class VALKRON_API Scene {

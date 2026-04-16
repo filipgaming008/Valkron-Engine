@@ -42,6 +42,10 @@ if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/vendor/imviewguizmo/ImViewGuizmo.h")
     message(FATAL_ERROR "ImViewGuizmo submodule not found! Please run: git submodule update --init --recursive")
 endif()
 
+if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/vendor/imguifiledialog/ImGuiFileDialog.cpp")
+    message(FATAL_ERROR "ImGuiFileDialog submodule not found! Please run: git submodule update --init --recursive")
+endif()
+
 set(IMGUI_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/vendor/imgui/imgui.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/vendor/imgui/imgui_draw.cpp
@@ -51,15 +55,26 @@ set(IMGUI_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/vendor/imgui/backends/imgui_impl_glfw.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/vendor/imgui/backends/imgui_impl_opengl3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/vendor/imguizmo/ImGuizmo.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/vendor/imguifiledialog/ImGuiFileDialog.cpp
 )
 
 add_library(imgui STATIC ${IMGUI_SOURCES})
 set_target_properties(imgui PROPERTIES POSITION_INDEPENDENT_CODE ON)
+target_compile_definitions(imgui
+    PUBLIC USE_PLACES_FEATURE
+    PUBLIC USE_PLACES_BOOKMARKS
+    PUBLIC USE_PLACES_DEVICES
+    PUBLIC PLACES_PANE_DEFAULT_SHOWN=true
+    PUBLIC placesDevicesGroupName="Drives"
+    PUBLIC devicesButtonString="Drives"
+    PUBLIC buttonDriveString="Drives"
+)
 target_include_directories(imgui
     PUBLIC  ${CMAKE_CURRENT_SOURCE_DIR}/vendor/imgui
     PUBLIC  ${CMAKE_CURRENT_SOURCE_DIR}/vendor/imgui/misc/cpp
     PUBLIC  ${CMAKE_CURRENT_SOURCE_DIR}/vendor/imgui/backends
     PUBLIC  ${CMAKE_CURRENT_SOURCE_DIR}/vendor/imguizmo
+    PUBLIC  ${CMAKE_CURRENT_SOURCE_DIR}/vendor/imguifiledialog
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/vendor/glfw/include
 )
 
@@ -111,6 +126,7 @@ target_include_directories(${PROJECT_NAME}
     PUBLIC  ${CMAKE_CURRENT_SOURCE_DIR}/vendor/imgui
     PUBLIC  ${CMAKE_CURRENT_SOURCE_DIR}/vendor/imgui/backends
     PUBLIC  ${CMAKE_CURRENT_SOURCE_DIR}/vendor/imguizmo
+    PUBLIC  ${CMAKE_CURRENT_SOURCE_DIR}/vendor/imguifiledialog
     PUBLIC  ${CMAKE_CURRENT_SOURCE_DIR}/vendor/imviewguizmo
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/vendor/stb
 )
@@ -137,4 +153,14 @@ set_target_properties(${PROJECT_NAME} PROPERTIES
     ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/bin/lib"
     LIBRARY_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/bin/lib"
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/bin/src"
+)
+
+add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:${PROJECT_NAME}>/assets"
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+        "${CMAKE_CURRENT_SOURCE_DIR}/assets"
+        "$<TARGET_FILE_DIR:${PROJECT_NAME}>/assets"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${CMAKE_CURRENT_SOURCE_DIR}/imgui.ini"
+        "$<TARGET_FILE_DIR:${PROJECT_NAME}>/imgui.ini"
 )

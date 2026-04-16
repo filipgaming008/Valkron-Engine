@@ -14,6 +14,8 @@ namespace Valkron {
         bool dockedFullscreenWindowed = true;
         bool autoDetectMonitorSize = true;
         std::string windowTitle = "Valkron Engine";
+        int deselectKey = 256;
+        int deleteEntityKey = 261;
     };
 
     class VALKRON_API EngineConfig {
