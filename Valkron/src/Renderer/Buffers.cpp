@@ -4,15 +4,6 @@
 
 namespace Valkron {
 
-    unsigned int VertexBufferElement::getSizeOfType(unsigned int type) {
-        switch (type) {
-            case GL_FLOAT: return 4;
-            case GL_UNSIGNED_INT: return 4;
-            case GL_UNSIGNED_BYTE: return 1;
-            default: return 0;
-        }
-    }
-
     VertexBuffer::VertexBuffer(const void* data, unsigned int size) {
         VALKRON_CORE_ASSERT(data != nullptr, "VertexBuffer data pointer must not be null");
         VALKRON_CORE_ASSERT(size > 0, "VertexBuffer size must be greater than zero");

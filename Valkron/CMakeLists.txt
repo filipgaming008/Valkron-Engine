@@ -38,11 +38,12 @@ target_include_directories(${PROJECT_NAME}
     PUBLIC  ${CMAKE_CURRENT_SOURCE_DIR}/vendor/glfw/include
     PUBLIC  ${CMAKE_CURRENT_SOURCE_DIR}/vendor/glm
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/vendor/stb
+    PUBLIC  ${CMAKE_BINARY_DIR}/Valkron/gladsources/glad_gl_core_46/include
 )
 
 # Link GLFW and OpenGL
 find_package(OpenGL REQUIRED)
-target_link_libraries(${PROJECT_NAME} PRIVATE glfw OpenGL::GL glad_gl_core_46)
+target_link_libraries(${PROJECT_NAME} PUBLIC glfw OpenGL::GL glad_gl_core_46)
 
 # Platform detection
 if(UNIX AND NOT APPLE)

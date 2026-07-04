@@ -1,9 +1,18 @@
 #include "Valkron.hpp"
+#include "SampleScene.hpp"
+
+namespace Valkron {
+
+    class SandboxApp : public Application {
+        public:
+            void onInit() override {
+                Sample::createTriangleEntity(*getScene(), "HelloTriangle");
+            }
+    };
+
+}
 
 int main() {
-
-    Valkron::Application app;
-    app.Run();
-
-    return 0;
+    Valkron::SandboxApp app;
+    return app.run();
 }

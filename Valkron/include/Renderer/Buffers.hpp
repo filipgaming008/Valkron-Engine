@@ -7,12 +7,22 @@
 
 namespace Valkron {
 
-    struct VertexBufferElement {
+    struct VALKRON_API VertexBufferElement {
         unsigned int type;
         unsigned int count;
         unsigned char normalized;
 
-        static unsigned int getSizeOfType(unsigned int type);
+        static unsigned int getSizeOfType(unsigned int type) {
+            switch (type) {
+                case 0x1406:
+                case 0x1405:
+                    return 4;
+                case 0x1401:
+                    return 1;
+                default:
+                    return 0;
+            }
+        }
     };
 
     class VALKRON_API VertexLayout {
@@ -67,6 +77,7 @@ namespace Valkron {
             void unbind() const;
 
             unsigned int getCount() const { return m_count; }
+            unsigned int getID() const { return m_rendererID; }
 
         private:
             unsigned int m_rendererID = 0;
@@ -81,6 +92,8 @@ namespace Valkron {
             void bind() const;
             void unbind() const;
             void addBuffer(const VertexBuffer& vertexBuffer, const VertexLayout& layout);
+
+            unsigned int getID() const { return m_rendererID; }
 
         private:
             unsigned int m_rendererID = 0;

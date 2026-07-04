@@ -6,7 +6,6 @@
 
 namespace Valkron {
 
-
     class VALKRON_API Layer {
         protected:
             int m_layerId;
@@ -17,10 +16,10 @@ namespace Valkron {
             virtual void onAttach() {}
             virtual void onDetach() {}
             virtual void onUpdate(float) {}
+            virtual void onRender() {}
             virtual void onEvent(Event&) {}
 
             int getLayerId() const { return m_layerId; }
     };
-
 
 }

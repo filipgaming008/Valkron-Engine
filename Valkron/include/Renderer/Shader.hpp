@@ -21,6 +21,8 @@ namespace Valkron {
             void setMat3(const std::string& name, const float* value) const;
             void setMat4(const std::string& name, const float* value) const;
 
+            unsigned int getProgramID() const { return m_programID; }
+
         private:
             unsigned int m_programID = 0;
 
